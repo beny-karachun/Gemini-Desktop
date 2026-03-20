@@ -825,6 +825,119 @@ class GeminiDesktop {
     this.positionContextMenu(e);
   }
 
+  // Drag items inside a folder window onto subfolder targets
+  makeInWindowDraggable(el, itemId, itemType, currentFolder, win) {
+    let ghost = null, startX = 0, startY = 0, moved = false;
+
+    const onMouseDown = (e) => {
+      // Ignore if clicking the remove button
+      if (e.target.closest('.remove-from-folder-btn')) return;
+      if (e.button !== 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+
+      startX = e.clientX;
+      startY = e.clientY;
+      moved = false;
+
+      const onMove = (me) => {
+        const dx = me.clientX - startX;
+        const dy = me.clientY - startY;
+
+        // Require a small drag threshold before activating
+        if (!moved && Math.abs(dx) < 5 && Math.abs(dy) < 5) return;
+
+        if (!moved) {
+          moved = true;
+          // Create ghost clone
+          ghost = el.cloneNode(true);
+          ghost.className = 'desktop-icon static-icon dragging-ghost';
+          ghost.style.position = 'fixed';
+          ghost.style.pointerEvents = 'none';
+          ghost.style.zIndex = '2147483647';
+          ghost.style.opacity = '0.85';
+          ghost.style.transform = 'scale(1.08)';
+          ghost.style.filter = 'drop-shadow(0 8px 16px rgba(0,0,0,0.5))';
+          ghost.style.width = el.offsetWidth + 'px';
+          document.documentElement.appendChild(ghost);
+          el.style.opacity = '0.3';
+        }
+
+        ghost.style.left = (me.clientX - el.offsetWidth / 2) + 'px';
+        ghost.style.top = (me.clientY - el.offsetHeight / 2) + 'px';
+
+        // Highlight subfolder drop targets in the window
+        const content = win.querySelector('.folder-window-content');
+        content.querySelectorAll('.drop-target').forEach(dt => dt.classList.remove('drop-target'));
+        const targets = document.elementsFromPoint(me.clientX, me.clientY);
+        const subfolderTarget = targets.find(t =>
+          t.dataset && t.dataset.type === 'subfolder-in-window' && t.dataset.id !== itemId
+        );
+        if (subfolderTarget) subfolderTarget.classList.add('drop-target');
+      };
+
+      const onUp = (ue) => {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+
+        if (ghost) { ghost.remove(); ghost = null; }
+        el.style.opacity = '';
+
+        const content = win.querySelector('.folder-window-content');
+        content.querySelectorAll('.drop-target').forEach(dt => dt.classList.remove('drop-target'));
+
+        if (!moved) return;
+
+        // Check what we dropped on
+        const targets = document.elementsFromPoint(ue.clientX, ue.clientY);
+        const subfolderTarget = targets.find(t =>
+          t.dataset && t.dataset.type === 'subfolder-in-window' && t.dataset.id !== itemId
+        );
+
+        if (subfolderTarget) {
+          const targetFolderId = subfolderTarget.dataset.id;
+
+          if (itemType === 'chat') {
+            // Remove from current folder, add to target subfolder
+            currentFolder.contents = currentFolder.contents.filter(c => c !== itemId);
+            const targetFolder = this.getFolderById(targetFolderId);
+            if (targetFolder && !targetFolder.contents.includes(itemId)) {
+              targetFolder.contents.push(itemId);
+            }
+            this.saveState();
+            this.updateFolderBadge(currentFolder.id);
+            this.updateFolderBadge(targetFolderId);
+            this.refreshFolderWindow(currentFolder.id);
+            this.showToast('Chat moved to subfolder');
+          } else if (itemType === 'subfolder') {
+            // Move subfolder into another subfolder
+            const source = this.getFolderById(itemId);
+            if (source && !this.isDescendant(itemId, targetFolderId) && itemId !== targetFolderId) {
+              currentFolder.contents = currentFolder.contents.filter(c => c !== itemId);
+              source.parentId = targetFolderId;
+              const targetFolder = this.getFolderById(targetFolderId);
+              if (targetFolder && !targetFolder.contents.includes(itemId)) {
+                targetFolder.contents.push(itemId);
+              }
+              this.saveState();
+              this.updateFolderBadge(currentFolder.id);
+              this.updateFolderBadge(targetFolderId);
+              this.refreshFolderWindow(currentFolder.id);
+              this.showToast(`"${source.name}" moved to subfolder`);
+            } else {
+              this.showToast("Can't move a folder into its own subfolder");
+            }
+          }
+        }
+      };
+
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    };
+
+    el.addEventListener('mousedown', onMouseDown);
+  }
+
   renderFolderContents(folder, container, win) {
     container.innerHTML = '';
 
@@ -863,7 +976,6 @@ class GeminiDesktop {
 
       el.querySelector('.remove-from-folder-btn').onclick = (e) => {
         e.stopPropagation();
-        // Move subfolder to desktop root
         subfolder.parentId = null;
         folder.contents = folder.contents.filter(c => c !== sfId);
         this.saveState();
@@ -875,6 +987,9 @@ class GeminiDesktop {
         }
         this.showToast(`"${subfolder.name}" moved to desktop`);
       };
+
+      // Enable in-window drag to move into other subfolders
+      this.makeInWindowDraggable(el, subfolder.id, 'subfolder', folder, win);
 
       container.appendChild(el);
     });
@@ -906,6 +1021,9 @@ class GeminiDesktop {
           container.innerHTML = '<div class="folder-empty-msg">Right-click to create a subfolder, or drag items here</div>';
         }
       };
+
+      // Enable in-window drag to move into subfolders
+      this.makeInWindowDraggable(el, chat.url, 'chat', folder, win);
 
       container.appendChild(el);
     });
