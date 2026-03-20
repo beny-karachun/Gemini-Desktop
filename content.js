@@ -3,12 +3,13 @@ class GeminiDesktop {
     this.folders = [];
     this.chats = [];
     this.chatPositions = {};
+    this.chatTitleCache = {}; // persistent URL→title cache
     this.isDesktopActive = false;
     this.draggedEl = null;
     this.newFolderTarget = { x: 0, y: 0 };
     this.newFolderParentId = null;
     this.zIndexCounter = 100;
-    this.selectedIcons = new Set(); // multi-selection
+    this.selectedIcons = new Set();
 
     this.init();
   }
@@ -63,6 +64,14 @@ class GeminiDesktop {
 
   // ── Folder Helpers ──────────────────────────────────
   getFolderById(id) { return this.folders.find(f => f.id === id); }
+
+  // Look up a chat title: live data → cache → fallback
+  getChatTitle(url) {
+    const live = this.chats.find(c => c.url === url);
+    if (live) return live.title;
+    if (this.chatTitleCache[url]) return this.chatTitleCache[url];
+    return 'Chat';
+  }
 
   // Get total item count (chats + subfolders) for badge
   getFolderItemCount(folder) {
@@ -151,13 +160,20 @@ class GeminiDesktop {
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
           Gemini Workspace
         </h1>
-        <button class="close-desktop-btn" id="gd-close-desktop">&times;</button>
+        <div class="desktop-header-actions">
+          <button class="scan-chats-btn" id="gd-scan-chats" title="Scroll through your chat list to discover all chat titles">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
+            Scan All Chats
+          </button>
+          <button class="close-desktop-btn" id="gd-close-desktop">&times;</button>
+        </div>
       </div>
       <div class="desktop-workarea" id="gd-workarea"></div>
     `;
     document.documentElement.appendChild(this.overlay);
     this.workarea = document.getElementById('gd-workarea');
     document.getElementById('gd-close-desktop').onclick = () => this.toggleDesktop();
+    document.getElementById('gd-scan-chats').onclick = () => this.scanAllChats();
   }
 
   createContextMenu() {
@@ -462,6 +478,98 @@ class GeminiDesktop {
     }
   }
 
+  // ── Auto-Scroll Scanner ─────────────────────────────
+  async scanAllChats() {
+    const scanBtn = document.getElementById('gd-scan-chats');
+    if (scanBtn.disabled) return;
+    scanBtn.disabled = true;
+    scanBtn.innerHTML = `
+      <svg class="spin-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
+      Scanning...
+    `;
+
+    // Hide overlay so the sidebar is accessible to the DOM
+    this.overlay.style.opacity = '0';
+    this.overlay.style.pointerEvents = 'none';
+
+    // Wait a moment for the sidebar to be interactable
+    await new Promise(r => setTimeout(r, 300));
+
+    // Find the scrollable chat list container
+    // Gemini uses a nav or scrollable container holding the chat links
+    const sidebar = this.findScrollableSidebar();
+    if (!sidebar) {
+      this.showToast('Could not find chat sidebar. Try scrolling manually.');
+      this.overlay.style.opacity = '';
+      this.overlay.style.pointerEvents = '';
+      scanBtn.disabled = false;
+      scanBtn.innerHTML = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg> Scan All Chats`;
+      return;
+    }
+
+    const startCount = Object.keys(this.chatTitleCache).length;
+    let prevChatCount = 0;
+    let stableRounds = 0;
+    const maxScrollAttempts = 50; // safety limit
+
+    for (let i = 0; i < maxScrollAttempts; i++) {
+      // Scroll down
+      sidebar.scrollTop += sidebar.clientHeight * 0.8;
+      await new Promise(r => setTimeout(r, 400));
+
+      // Extract chats (updates the cache)
+      this.extractChats();
+
+      const currentCount = Object.keys(this.chatTitleCache).length;
+      if (currentCount === prevChatCount) {
+        stableRounds++;
+        if (stableRounds >= 3) break; // no new chats found for 3 rounds
+      } else {
+        stableRounds = 0;
+      }
+      prevChatCount = currentCount;
+    }
+
+    // Scroll back to top
+    sidebar.scrollTop = 0;
+
+    // Re-show overlay
+    this.overlay.style.opacity = '';
+    this.overlay.style.pointerEvents = '';
+
+    const newCount = Object.keys(this.chatTitleCache).length;
+    const discovered = newCount - startCount;
+    this.showToast(`Scan complete! ${newCount} chats cached${discovered > 0 ? ` (+${discovered} new)` : ''}`);
+
+    // Re-extract and re-render
+    this.extractChats();
+
+    // Refresh any open folder windows to update titles
+    this.folders.forEach(f => this.refreshFolderWindow(f.id));
+
+    scanBtn.disabled = false;
+    scanBtn.innerHTML = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg> Scan All Chats`;
+  }
+
+  findScrollableSidebar() {
+    // Strategy: find the container that holds chat links and is scrollable
+    // Look for common sidebar selectors in Gemini's UI
+    const chatLink = document.querySelector('a[href^="/app/"]');
+    if (!chatLink) return null;
+
+    // Walk up from a chat link to find the nearest scrollable ancestor
+    let el = chatLink.parentElement;
+    while (el && el !== document.body) {
+      const style = window.getComputedStyle(el);
+      const overflowY = style.overflowY;
+      if ((overflowY === 'auto' || overflowY === 'scroll') && el.scrollHeight > el.clientHeight) {
+        return el;
+      }
+      el = el.parentElement;
+    }
+    return null;
+  }
+
   // ── Folder CRUD ─────────────────────────────────────
   createNewFolder(name, parentId) {
     const folderId = 'folder-' + Date.now();
@@ -526,8 +634,8 @@ class GeminiDesktop {
 
     // Re-render released chats
     allChats.forEach(url => {
-      const chat = this.chats.find(c => c.url === url);
-      if (chat) this.renderChat(chat);
+      const chat = { url, title: this.getChatTitle(url) };
+      this.renderChat(chat);
     });
 
     this.showToast(`Folder "${folder.name}" deleted`);
@@ -1221,7 +1329,7 @@ class GeminiDesktop {
               currentFolder.contents = currentFolder.contents.filter(c => c !== id);
               this.chatPositions[id] = { x: Math.max(0, dropX), y: Math.max(0, dropY) };
               this.saveChatPositions();
-              const chat = this.chats.find(c => c.url === id) || { url: id, title: 'Chat' };
+              const chat = { url: id, title: this.getChatTitle(id) };
               this.renderChat(chat);
             } else {
               const src = this.getFolderById(id);
@@ -1308,7 +1416,8 @@ class GeminiDesktop {
 
     // Render chats
     chatUrls.forEach(url => {
-      const chat = this.chats.find(c => c.url === url) || { url, title: 'Chat' };
+      const title = this.getChatTitle(url);
+      const chat = { url, title };
 
       const el = document.createElement('div');
       el.className = 'desktop-icon static-icon';
@@ -1347,8 +1456,8 @@ class GeminiDesktop {
       folder.contents = folder.contents.filter(url => url !== chatUrl);
       this.saveState();
       this.updateFolderBadge(folderId);
-      const chat = this.chats.find(c => c.url === chatUrl);
-      if (chat) this.renderChat(chat);
+      const chat = { url: chatUrl, title: this.getChatTitle(chatUrl) };
+      this.renderChat(chat);
       this.showToast('Chat removed from folder');
     }
   }
@@ -1357,6 +1466,7 @@ class GeminiDesktop {
   extractChats() {
     const chatLinks = document.querySelectorAll('a[href^="/app/"]');
     const newChats = [];
+    let cacheUpdated = false;
     chatLinks.forEach(el => {
       const url = el.getAttribute('href');
       if (url === '/app/' || url === '/app') return;
@@ -1364,7 +1474,13 @@ class GeminiDesktop {
       const title = titleEl.innerText.trim() || 'Untitled Chat';
       const absUrl = new URL(url, window.location.origin).href;
       if (!newChats.find(c => c.url === absUrl)) newChats.push({ url: absUrl, title });
+      // Update title cache
+      if (this.chatTitleCache[absUrl] !== title) {
+        this.chatTitleCache[absUrl] = title;
+        cacheUpdated = true;
+      }
     });
+    if (cacheUpdated) this.saveTitleCache();
     this.chats = newChats;
     this.chats.forEach(chat => this.renderChat(chat));
   }
@@ -1380,9 +1496,17 @@ class GeminiDesktop {
       chrome.storage.local.set({ geminiChatPositions: this.chatPositions });
     }
   }
+  saveTitleCache() {
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+      chrome.storage.local.set({ geminiChatTitleCache: this.chatTitleCache });
+    }
+  }
   loadState() {
     if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-      chrome.storage.local.get(['geminiFolders', 'geminiChatPositions'], (res) => {
+      chrome.storage.local.get(['geminiFolders', 'geminiChatPositions', 'geminiChatTitleCache'], (res) => {
+        if (res.geminiChatTitleCache) {
+          this.chatTitleCache = res.geminiChatTitleCache;
+        }
         if (res.geminiFolders) {
           this.folders = res.geminiFolders;
           this.folders.forEach(f => this.renderFolder(f));
