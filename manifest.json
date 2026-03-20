@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "Gemini Desktop Workspace",
+  "version": "1.0",
+  "description": "Drag and drop your Gemini chats into a beautiful custom desktop folders workspace.",
+  "permissions": [
+    "storage"
+  ],
+  "host_permissions": [
+    "*://gemini.google.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["*://gemini.google.com/*"],
+      "css": ["styles.css"],
+      "js": ["content.js"],
+      "run_at": "document_end"
+    }
+  ]
+}
