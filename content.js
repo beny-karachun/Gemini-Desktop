@@ -2,30 +2,25 @@ class GeminiDesktop {
   constructor() {
     this.folders = [];
     this.chats = [];
-    this.chatPositions = {}; // { url: { x, y } }
+    this.chatPositions = {};
     this.isDesktopActive = false;
     this.draggedEl = null;
     this.newFolderTarget = { x: 0, y: 0 };
+    this.newFolderParentId = null; // for subfolders
     this.zIndexCounter = 100;
-    this.contextTarget = null; // element that was right-clicked
 
     this.init();
   }
 
   async init() {
     try { this.injectFonts(); } catch(e) {}
-
     this.createUI();
     this.loadState();
-
     setInterval(() => this.extractChats(), 3000);
-
-    // Guardian to re-attach FAB if removed by Gemini SPA navigation
     setInterval(() => {
       if (!document.getElementById('gemini-desktop-toggle')) this.createToggleButton();
     }, 1500);
 
-    // Keyboard shortcuts
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
         if (this.modalBackdrop && this.modalBackdrop.classList.contains('active')) {
@@ -49,7 +44,7 @@ class GeminiDesktop {
     }
   }
 
-  // ── Toast ──────────────────────────────────────────
+  // ── Toast ───────────────────────────────────────────
   showToast(msg) {
     let container = document.getElementById('gd-toast-container');
     if (!container) {
@@ -62,13 +57,70 @@ class GeminiDesktop {
     toast.className = 'desktop-toast';
     toast.textContent = msg;
     container.appendChild(toast);
-    setTimeout(() => {
-      toast.classList.add('removing');
-      setTimeout(() => toast.remove(), 300);
-    }, 2500);
+    setTimeout(() => { toast.classList.add('removing'); setTimeout(() => toast.remove(), 300); }, 2500);
   }
 
-  // ── UI Creation ────────────────────────────────────
+  // ── Folder Helpers ──────────────────────────────────
+  getFolderById(id) { return this.folders.find(f => f.id === id); }
+
+  // Get total item count (chats + subfolders) for badge
+  getFolderItemCount(folder) {
+    const chatCount = folder.contents.filter(c => !c.startsWith('folder-')).length;
+    const subfolderCount = folder.contents.filter(c => c.startsWith('folder-')).length;
+    return chatCount + subfolderCount;
+  }
+
+  // Get all folders whose parentId matches
+  getChildFolders(parentId) {
+    return this.folders.filter(f => f.parentId === parentId);
+  }
+
+  // Prevent cycles: check if targetId is a descendant of sourceId
+  isDescendant(sourceId, targetId) {
+    const folder = this.getFolderById(targetId);
+    if (!folder) return false;
+    if (folder.parentId === sourceId) return true;
+    if (folder.parentId) return this.isDescendant(sourceId, folder.parentId);
+    return false;
+  }
+
+  // Get breadcrumb path from root to folder
+  getBreadcrumb(folder) {
+    const path = [folder];
+    let current = folder;
+    while (current.parentId) {
+      const parent = this.getFolderById(current.parentId);
+      if (!parent) break;
+      path.unshift(parent);
+      current = parent;
+    }
+    return path;
+  }
+
+  // Recursively collect all chat URLs from a folder tree
+  collectAllChats(folder) {
+    const chats = folder.contents.filter(c => !c.startsWith('folder-'));
+    const subfolderIds = folder.contents.filter(c => c.startsWith('folder-'));
+    subfolderIds.forEach(sfId => {
+      const sf = this.getFolderById(sfId);
+      if (sf) chats.push(...this.collectAllChats(sf));
+    });
+    return chats;
+  }
+
+  // Recursively collect all folder IDs in a tree
+  collectAllSubfolderIds(folder) {
+    const ids = [];
+    const subfolderIds = folder.contents.filter(c => c.startsWith('folder-'));
+    subfolderIds.forEach(sfId => {
+      ids.push(sfId);
+      const sf = this.getFolderById(sfId);
+      if (sf) ids.push(...this.collectAllSubfolderIds(sf));
+    });
+    return ids;
+  }
+
+  // ── UI Creation ─────────────────────────────────────
   createUI() {
     this.createToggleButton();
     this.createOverlay();
@@ -92,7 +144,6 @@ class GeminiDesktop {
     if (document.getElementById('gemini-desktop-overlay')) return;
     this.overlay = document.createElement('div');
     this.overlay.id = 'gemini-desktop-overlay';
-
     this.overlay.innerHTML = `
       <div class="desktop-header">
         <h1>
@@ -103,7 +154,6 @@ class GeminiDesktop {
       </div>
       <div class="desktop-workarea" id="gd-workarea"></div>
     `;
-
     document.documentElement.appendChild(this.overlay);
     this.workarea = document.getElementById('gd-workarea');
     document.getElementById('gd-close-desktop').onclick = () => this.toggleDesktop();
@@ -133,12 +183,10 @@ class GeminiDesktop {
       </div>
     `;
     document.documentElement.appendChild(this.modalBackdrop);
-
     this.modalInput = document.getElementById('gd-modal-input');
     this.modalTitle = document.getElementById('gd-modal-title');
     this.modalConfirmBtn = document.getElementById('gd-modal-confirm');
 
-    // Clicking backdrop = close
     this.modalBackdrop.addEventListener('click', (e) => {
       if (e.target === this.modalBackdrop) this.closeModal();
     });
@@ -149,9 +197,8 @@ class GeminiDesktop {
     });
   }
 
-  // ── Global Events ──────────────────────────────────
+  // ── Global Events ───────────────────────────────────
   bindGlobalEvents() {
-    // Right-click on workarea (blank space)
     this.workarea.addEventListener('contextmenu', (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -168,7 +215,6 @@ class GeminiDesktop {
       }
     });
 
-    // Dismiss context menu on any click
     document.addEventListener('click', (e) => {
       if (!e.target.closest('.desktop-context-menu')) {
         this.contextMenu.classList.remove('active');
@@ -176,7 +222,7 @@ class GeminiDesktop {
     });
   }
 
-  // ── Context Menus ──────────────────────────────────
+  // ── Context Menus ───────────────────────────────────
   positionContextMenu(e) {
     const menuW = 200, menuH = 200;
     let x = e.clientX, y = e.clientY;
@@ -205,6 +251,7 @@ class GeminiDesktop {
     `;
     const rect = this.workarea.getBoundingClientRect();
     this.newFolderTarget = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    this.newFolderParentId = null;
 
     this.contextMenu.onclick = (ev) => {
       const action = ev.target.closest('.context-menu-item')?.dataset.action;
@@ -236,9 +283,9 @@ class GeminiDesktop {
     this.contextMenu.onclick = (ev) => {
       const action = ev.target.closest('.context-menu-item')?.dataset.action;
       this.contextMenu.classList.remove('active');
-      const folder = this.folders.find(f => f.id === folderId);
+      const folder = this.getFolderById(folderId);
       if (!folder) return;
-      if (action === 'open') this.openFolderDetails(folder);
+      if (action === 'open') this.openFolderWindow(folder);
       if (action === 'rename') this.showRenameFolderModal(folder);
       if (action === 'delete') this.deleteFolder(folder);
     };
@@ -265,12 +312,11 @@ class GeminiDesktop {
       const item = ev.target.closest('.context-menu-item');
       if (!item) return;
       this.contextMenu.classList.remove('active');
-      const action = item.dataset.action;
-      if (action === 'open-chat') {
+      if (item.dataset.action === 'open-chat') {
         this.toggleDesktop();
         window.location.href = chatUrl;
       }
-      if (action === 'move') {
+      if (item.dataset.action === 'move') {
         this.moveChatToFolder(chatUrl, item.dataset.folder);
         icon.remove();
         this.showToast('Chat moved to folder');
@@ -279,7 +325,7 @@ class GeminiDesktop {
     this.positionContextMenu(e);
   }
 
-  // ── Modal Helpers ──────────────────────────────────
+  // ── Modal Helpers ───────────────────────────────────
   openModal(title, placeholder, confirmLabel, onConfirm) {
     this.modalTitle.textContent = title;
     this.modalInput.placeholder = placeholder;
@@ -294,13 +340,11 @@ class GeminiDesktop {
     };
   }
 
-  closeModal() {
-    this.modalBackdrop.classList.remove('active');
-  }
+  closeModal() { this.modalBackdrop.classList.remove('active'); }
 
   showNewFolderModal() {
     this.openModal('New Folder', 'Folder name...', 'Create', (name) => {
-      this.createNewFolder(name || 'New Folder');
+      this.createNewFolder(name || 'New Folder', this.newFolderParentId);
     });
   }
 
@@ -309,18 +353,20 @@ class GeminiDesktop {
       if (!name) return;
       folder.name = name;
       this.saveState();
-      const el = document.querySelector(`[data-id="${CSS.escape(folder.id)}"]`);
-      if (el) el.querySelector('.desktop-icon-label').textContent = name;
-      // Update any open window title
+      // Update all visible references
+      document.querySelectorAll(`[data-id="${CSS.escape(folder.id)}"] .desktop-icon-label`).forEach(lbl => lbl.textContent = name);
       const win = document.getElementById(`window-${folder.id}`);
-      if (win) win.querySelector('.folder-window-title span').textContent = name;
+      if (win) {
+        const titleSpan = win.querySelector('.folder-window-title-text');
+        if (titleSpan) titleSpan.textContent = name;
+      }
       this.showToast(`Renamed to "${name}"`);
     });
     this.modalInput.value = folder.name;
     this.modalInput.select();
   }
 
-  // ── Toggle Desktop ────────────────────────────────
+  // ── Toggle Desktop ─────────────────────────────────
   toggleDesktop() {
     if (!this.overlay) this.createOverlay();
     this.isDesktopActive = !this.isDesktopActive;
@@ -332,38 +378,87 @@ class GeminiDesktop {
     }
   }
 
-  // ── Folder CRUD ────────────────────────────────────
-  createNewFolder(name) {
+  // ── Folder CRUD ─────────────────────────────────────
+  createNewFolder(name, parentId) {
     const folderId = 'folder-' + Date.now();
     const folderInfo = {
       id: folderId,
       name: name,
+      parentId: parentId || null,
       x: this.newFolderTarget.x,
       y: this.newFolderTarget.y,
       contents: []
     };
     this.folders.push(folderInfo);
-    this.renderFolder(folderInfo);
+
+    if (parentId) {
+      // Add to parent's contents
+      const parent = this.getFolderById(parentId);
+      if (parent) {
+        parent.contents.push(folderId);
+        this.updateFolderBadge(parentId);
+        // Refresh open window
+        this.refreshFolderWindow(parentId);
+      }
+    } else {
+      // Render on desktop
+      this.renderFolder(folderInfo);
+    }
     this.saveState();
     this.showToast(`Folder "${name}" created`);
   }
 
   deleteFolder(folder) {
-    // Return chats to desktop
-    folder.contents.forEach(url => {
+    // Recursively release all chats back to desktop
+    const allChats = this.collectAllChats(folder);
+    const allSubIds = this.collectAllSubfolderIds(folder);
+
+    // Remove all sub-folders from this.folders
+    this.folders = this.folders.filter(f => f.id !== folder.id && !allSubIds.includes(f.id));
+
+    // Remove from parent's contents if it's a subfolder
+    if (folder.parentId) {
+      const parent = this.getFolderById(folder.parentId);
+      if (parent) {
+        parent.contents = parent.contents.filter(c => c !== folder.id);
+        this.updateFolderBadge(folder.parentId);
+        this.refreshFolderWindow(folder.parentId);
+      }
+    }
+
+    this.saveState();
+
+    // Remove desktop icon
+    const el = document.querySelector(`[data-id="${CSS.escape(folder.id)}"]`);
+    if (el) el.remove();
+
+    // Close any open windows for this folder or subfolders
+    const win = document.getElementById(`window-${folder.id}`);
+    if (win) win.remove();
+    allSubIds.forEach(id => {
+      const w = document.getElementById(`window-${id}`);
+      if (w) w.remove();
+    });
+
+    // Re-render released chats
+    allChats.forEach(url => {
       const chat = this.chats.find(c => c.url === url);
       if (chat) this.renderChat(chat);
     });
-    this.folders = this.folders.filter(f => f.id !== folder.id);
-    this.saveState();
-    const el = document.querySelector(`[data-id="${CSS.escape(folder.id)}"]`);
-    if (el) el.remove();
-    const win = document.getElementById(`window-${folder.id}`);
-    if (win) win.remove();
+
     this.showToast(`Folder "${folder.name}" deleted`);
   }
 
-  // ── Drag Helpers ───────────────────────────────────
+  updateFolderBadge(folderId) {
+    const folder = this.getFolderById(folderId);
+    if (!folder) return;
+    try {
+      const el = document.querySelector(`[data-id="${CSS.escape(folderId)}"] .f-badge`);
+      if (el) el.textContent = this.getFolderItemCount(folder);
+    } catch(e) {}
+  }
+
+  // ── Drag Helpers ────────────────────────────────────
   bringToFront(el) {
     this.zIndexCounter++;
     el.style.zIndex = this.zIndexCounter;
@@ -374,13 +469,11 @@ class GeminiDesktop {
       if (e.button !== 0) return;
       e.preventDefault();
       this.bringToFront(win);
-
       const startMouseX = e.clientX, startMouseY = e.clientY;
       const bounds = win.getBoundingClientRect();
       const workBounds = this.workarea.getBoundingClientRect();
       const startX = bounds.left - workBounds.left;
       const startY = bounds.top - workBounds.top;
-
       const onMove = (me) => {
         win.style.left = (startX + me.clientX - startMouseX) + 'px';
         win.style.top  = (startY + me.clientY - startMouseY) + 'px';
@@ -395,7 +488,6 @@ class GeminiDesktop {
     el.onmousedown = (e) => {
       if (e.button !== 0) return;
       e.preventDefault();
-
       this.bringToFront(el);
       const startMouseX = e.clientX, startMouseY = e.clientY;
       const bounds = el.getBoundingClientRect();
@@ -403,25 +495,22 @@ class GeminiDesktop {
       const startX = bounds.left - workBounds.left;
       const startY = bounds.top - workBounds.top;
       let moved = false;
-
       this.draggedEl = el;
       el.classList.add('dragging');
 
       const onMove = (me) => {
         moved = true;
-        const newX = startX + me.clientX - startMouseX;
-        const newY = startY + me.clientY - startMouseY;
-        el.style.left = newX + 'px';
-        el.style.top  = newY + 'px';
+        el.style.left = (startX + me.clientX - startMouseX) + 'px';
+        el.style.top  = (startY + me.clientY - startMouseY) + 'px';
 
-        // Highlight drop targets
-        if (el.dataset.type === 'chat') {
+        // Highlight drop targets (chats → folders, folders → folders)
+        const draggingType = el.dataset.type;
+        if (draggingType === 'chat' || draggingType === 'folder') {
           el.style.display = 'none';
           const targets = document.elementsFromPoint(me.clientX, me.clientY);
           el.style.display = '';
-          // Clear all highlights
           this.workarea.querySelectorAll('.drop-target').forEach(dt => dt.classList.remove('drop-target'));
-          const folderTarget = targets.find(t => t.dataset && t.dataset.type === 'folder');
+          const folderTarget = targets.find(t => t.dataset && t.dataset.type === 'folder' && t.dataset.id !== el.dataset.id);
           if (folderTarget) folderTarget.classList.add('drop-target');
         }
       };
@@ -431,10 +520,7 @@ class GeminiDesktop {
         document.removeEventListener('mouseup', onUp);
         el.classList.remove('dragging');
         this.workarea.querySelectorAll('.drop-target').forEach(dt => dt.classList.remove('drop-target'));
-
-        if (moved) {
-          this.handleDrop(el, ue.clientX, ue.clientY);
-        }
+        if (moved) this.handleDrop(el, ue.clientX, ue.clientY);
         if (onDragEnd) onDragEnd(el);
       };
 
@@ -445,46 +531,111 @@ class GeminiDesktop {
 
   handleDrop(el, clientX, clientY) {
     this.draggedEl = null;
-    const isChat = el.dataset.type === 'chat';
+    const dragType = el.dataset.type;
+    const dragId = el.dataset.id;
 
     el.style.display = 'none';
     const dropTargets = document.elementsFromPoint(clientX, clientY);
     el.style.display = '';
 
-    const targetFolder = dropTargets.find(t => t.dataset && t.dataset.type === 'folder');
+    const targetFolderEl = dropTargets.find(t => t.dataset && t.dataset.type === 'folder' && t.dataset.id !== dragId);
 
-    if (isChat && targetFolder) {
-      this.moveChatToFolder(el.dataset.id, targetFolder.dataset.id);
+    if (!targetFolderEl) return;
+    const targetFolderId = targetFolderEl.dataset.id;
+
+    if (dragType === 'chat') {
+      this.moveChatToFolder(dragId, targetFolderId);
       el.remove();
       this.showToast('Chat moved to folder');
+    } else if (dragType === 'folder') {
+      this.moveFolderToFolder(dragId, targetFolderId);
     }
   }
 
   moveChatToFolder(chatUrl, folderId) {
-    const folder = this.folders.find(f => f.id === folderId);
+    // Remove from any existing folder first
+    this.folders.forEach(f => {
+      const idx = f.contents.indexOf(chatUrl);
+      if (idx !== -1) {
+        f.contents.splice(idx, 1);
+        this.updateFolderBadge(f.id);
+        this.refreshFolderWindow(f.id);
+      }
+    });
+
+    const folder = this.getFolderById(folderId);
     if (folder && !folder.contents.includes(chatUrl)) {
       folder.contents.push(chatUrl);
       this.saveState();
+      this.updateFolderBadge(folderId);
+      this.refreshFolderWindow(folderId);
 
-      // Update badge
       try {
         const folderEl = document.querySelector(`[data-id="${CSS.escape(folderId)}"]`);
         if (folderEl) {
-          folderEl.querySelector('.f-badge').textContent = folder.contents.length;
           folderEl.style.transform = 'scale(1.12)';
           setTimeout(() => folderEl.style.transform = '', 200);
         }
       } catch(e) {}
 
-      // Remove chat position from saved state
       delete this.chatPositions[chatUrl];
       this.saveChatPositions();
     }
   }
 
-  // ── Rendering Icons ────────────────────────────────
+  moveFolderToFolder(sourceFolderId, targetFolderId) {
+    const source = this.getFolderById(sourceFolderId);
+    const target = this.getFolderById(targetFolderId);
+    if (!source || !target) return;
+
+    // Prevent moving into self or descendants
+    if (sourceFolderId === targetFolderId) return;
+    if (this.isDescendant(sourceFolderId, targetFolderId)) {
+      this.showToast("Can't move a folder into its own subfolder");
+      return;
+    }
+
+    // Remove from old parent
+    if (source.parentId) {
+      const oldParent = this.getFolderById(source.parentId);
+      if (oldParent) {
+        oldParent.contents = oldParent.contents.filter(c => c !== sourceFolderId);
+        this.updateFolderBadge(oldParent.id);
+        this.refreshFolderWindow(oldParent.id);
+      }
+    }
+
+    // Remove from desktop
+    const desktopIcon = document.querySelector(`[data-id="${CSS.escape(sourceFolderId)}"]`);
+    if (desktopIcon) desktopIcon.remove();
+
+    // Add to new parent
+    source.parentId = targetFolderId;
+    if (!target.contents.includes(sourceFolderId)) {
+      target.contents.push(sourceFolderId);
+    }
+
+    this.saveState();
+    this.updateFolderBadge(targetFolderId);
+    this.refreshFolderWindow(targetFolderId);
+
+    try {
+      const targetEl = document.querySelector(`[data-id="${CSS.escape(targetFolderId)}"]`);
+      if (targetEl) {
+        targetEl.style.transform = 'scale(1.12)';
+        setTimeout(() => targetEl.style.transform = '', 200);
+      }
+    } catch(e) {}
+
+    this.showToast(`"${source.name}" moved into "${target.name}"`);
+  }
+
+  // ── Rendering Icons ─────────────────────────────────
   renderFolder(folder) {
     if (!this.workarea) return;
+    // Only render top-level folders on desktop
+    if (folder.parentId) return;
+
     const el = document.createElement('div');
     el.className = 'desktop-icon';
     el.dataset.type = 'folder';
@@ -493,17 +644,14 @@ class GeminiDesktop {
     el.style.top = folder.y + 'px';
 
     el.innerHTML = `
-      <div class="f-badge">${folder.contents.length}</div>
+      <div class="f-badge">${this.getFolderItemCount(folder)}</div>
       <svg class="desktop-icon-svg" viewBox="0 0 24 24">
         <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
       </svg>
       <div class="desktop-icon-label">${folder.name}</div>
     `;
 
-    el.ondblclick = (e) => {
-      e.stopPropagation();
-      this.openFolderDetails(folder);
-    };
+    el.ondblclick = (e) => { e.stopPropagation(); this.openFolderWindow(folder); };
 
     this.makeDraggable(el, () => {
       folder.x = parseInt(el.style.left) || 0;
@@ -516,6 +664,7 @@ class GeminiDesktop {
 
   renderChat(chat) {
     if (!this.workarea) return;
+    // Check if in ANY folder
     const isInFolder = this.folders.some(f => f.contents.includes(chat.url));
     if (isInFolder) return;
 
@@ -528,7 +677,6 @@ class GeminiDesktop {
     el.dataset.type = 'chat';
     el.dataset.id = chat.url;
 
-    // Use saved position or compute a grid slot
     const saved = this.chatPositions[chat.url];
     if (saved) {
       el.style.left = saved.x + 'px';
@@ -548,16 +696,10 @@ class GeminiDesktop {
       <div class="desktop-icon-label">${chat.title}</div>
     `;
 
-    el.ondblclick = () => {
-      this.toggleDesktop();
-      window.location.href = chat.url;
-    };
+    el.ondblclick = () => { this.toggleDesktop(); window.location.href = chat.url; };
 
     this.makeDraggable(el, () => {
-      this.chatPositions[chat.url] = {
-        x: parseInt(el.style.left) || 0,
-        y: parseInt(el.style.top) || 0
-      };
+      this.chatPositions[chat.url] = { x: parseInt(el.style.left) || 0, y: parseInt(el.style.top) || 0 };
       this.saveChatPositions();
     });
 
@@ -565,56 +707,54 @@ class GeminiDesktop {
   }
 
   getNextGridSlot() {
-    const colWidth = 120, rowHeight = 110;
-    const startX = 30, startY = 20;
+    const colWidth = 120, rowHeight = 110, startX = 30, startY = 20;
     const maxCols = Math.max(1, Math.floor((window.innerWidth - 60) / colWidth));
-
-    // Count existing icons in workarea to find next empty slot
     const usedSlots = new Set();
     this.workarea.querySelectorAll('.desktop-icon').forEach(icon => {
-      const x = parseInt(icon.style.left) || 0;
-      const y = parseInt(icon.style.top) || 0;
-      const col = Math.round((x - startX) / colWidth);
-      const row = Math.round((y - startY) / rowHeight);
+      const col = Math.round(((parseInt(icon.style.left) || 0) - startX) / colWidth);
+      const row = Math.round(((parseInt(icon.style.top) || 0) - startY) / rowHeight);
       usedSlots.add(`${col},${row}`);
     });
-
     for (let row = 0; row < 100; row++) {
       for (let col = 0; col < maxCols; col++) {
-        if (!usedSlots.has(`${col},${row}`)) {
-          return { x: startX + col * colWidth, y: startY + row * rowHeight };
-        }
+        if (!usedSlots.has(`${col},${row}`)) return { x: startX + col * colWidth, y: startY + row * rowHeight };
       }
     }
     return { x: startX, y: startY };
   }
 
-  // ── Folder Window ──────────────────────────────────
-  openFolderDetails(folder) {
+  // ── Folder Window with Breadcrumb ───────────────────
+  openFolderWindow(folder) {
     const existingWindow = document.getElementById(`window-${folder.id}`);
-    if (existingWindow) {
-      this.bringToFront(existingWindow);
-      return;
-    }
+    if (existingWindow) { this.bringToFront(existingWindow); return; }
 
     const win = document.createElement('div');
     win.className = 'folder-window';
     win.id = `window-${folder.id}`;
 
-    // Center nicely
     const workareaRect = this.workarea.getBoundingClientRect();
-    const winW = 500, winH = 300;
-    const centerX = Math.max(20, (workareaRect.width - winW) / 2);
-    const centerY = Math.max(20, (workareaRect.height - winH) / 3);
-    win.style.top = centerY + 'px';
-    win.style.left = centerX + 'px';
+    win.style.top = Math.max(20, (workareaRect.height - 300) / 3) + 'px';
+    win.style.left = Math.max(20, (workareaRect.width - 500) / 2) + 'px';
     this.bringToFront(win);
+
+    this.buildFolderWindowHTML(win, folder);
+    this.workarea.appendChild(win);
+  }
+
+  buildFolderWindowHTML(win, folder) {
+    const breadcrumb = this.getBreadcrumb(folder);
+    const breadcrumbHTML = breadcrumb.map((f, i) => {
+      if (i === breadcrumb.length - 1) {
+        return `<span class="breadcrumb-current">${f.name}</span>`;
+      }
+      return `<span class="breadcrumb-link" data-folder-id="${f.id}">${f.name}</span><span class="breadcrumb-sep">›</span>`;
+    }).join('');
 
     win.innerHTML = `
       <div class="folder-window-header">
         <span class="folder-window-title">
           <svg viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-          <span>${folder.name}</span>
+          <span class="folder-window-breadcrumb">${breadcrumbHTML}</span>
         </span>
         <button class="folder-window-close">&times;</button>
       </div>
@@ -625,18 +765,122 @@ class GeminiDesktop {
     this.makeWindowDraggable(win, win.querySelector('.folder-window-header'));
     win.onmousedown = () => this.bringToFront(win);
 
-    this.renderFolderContents(folder, win.querySelector('.folder-window-content'));
-    this.workarea.appendChild(win);
+    // Breadcrumb navigation
+    win.querySelectorAll('.breadcrumb-link').forEach(link => {
+      link.onclick = (e) => {
+        e.stopPropagation();
+        const targetFolder = this.getFolderById(link.dataset.folderId);
+        if (targetFolder) this.navigateFolderWindow(win, targetFolder);
+      };
+    });
+
+    // Right-click inside folder window for "New Subfolder"
+    const content = win.querySelector('.folder-window-content');
+    content.addEventListener('contextmenu', (e) => {
+      if (e.target.closest('.desktop-icon')) return;
+      e.preventDefault();
+      e.stopPropagation();
+      this.showSubfolderContextMenu(e, folder, win);
+    });
+
+    this.renderFolderContents(folder, content, win);
   }
 
-  renderFolderContents(folder, container) {
+  navigateFolderWindow(win, folder) {
+    // Preserve position
+    const left = win.style.left;
+    const top = win.style.top;
+    const zIdx = win.style.zIndex;
+    win.id = `window-${folder.id}`;
+    this.buildFolderWindowHTML(win, folder);
+    win.style.left = left;
+    win.style.top = top;
+    win.style.zIndex = zIdx;
+  }
+
+  refreshFolderWindow(folderId) {
+    const win = document.getElementById(`window-${folderId}`);
+    if (!win) return;
+    const folder = this.getFolderById(folderId);
+    if (!folder) return;
+    this.navigateFolderWindow(win, folder);
+  }
+
+  showSubfolderContextMenu(e, parentFolder, win) {
+    this.contextMenu.innerHTML = `
+      <div class="context-menu-item" data-action="new-subfolder">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>
+        New Subfolder
+      </div>
+    `;
+    this.contextMenu.onclick = (ev) => {
+      const action = ev.target.closest('.context-menu-item')?.dataset.action;
+      this.contextMenu.classList.remove('active');
+      if (action === 'new-subfolder') {
+        this.newFolderParentId = parentFolder.id;
+        this.newFolderTarget = { x: 0, y: 0 };
+        this.showNewFolderModal();
+      }
+    };
+    this.positionContextMenu(e);
+  }
+
+  renderFolderContents(folder, container, win) {
     container.innerHTML = '';
-    if (folder.contents.length === 0) {
-      container.innerHTML = '<div class="folder-empty-msg">Drop chats here to organize them</div>';
+
+    // Subfolders first
+    const subfolderIds = folder.contents.filter(c => c.startsWith('folder-'));
+    const chatUrls = folder.contents.filter(c => !c.startsWith('folder-'));
+
+    if (subfolderIds.length === 0 && chatUrls.length === 0) {
+      container.innerHTML = '<div class="folder-empty-msg">Right-click to create a subfolder, or drag items here</div>';
       return;
     }
 
-    folder.contents.forEach(url => {
+    // Render subfolders
+    subfolderIds.forEach(sfId => {
+      const subfolder = this.getFolderById(sfId);
+      if (!subfolder) return;
+
+      const el = document.createElement('div');
+      el.className = 'desktop-icon static-icon';
+      el.dataset.type = 'subfolder-in-window';
+      el.dataset.id = subfolder.id;
+
+      el.innerHTML = `
+        <button class="remove-from-folder-btn" title="Remove from folder">\u00d7</button>
+        <div class="f-badge" style="position:absolute;top:-2px;right:0;">${this.getFolderItemCount(subfolder)}</div>
+        <svg class="desktop-icon-svg" viewBox="0 0 24 24">
+          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+        </svg>
+        <div class="desktop-icon-label">${subfolder.name}</div>
+      `;
+
+      el.ondblclick = (e) => {
+        e.stopPropagation();
+        this.navigateFolderWindow(win, subfolder);
+      };
+
+      el.querySelector('.remove-from-folder-btn').onclick = (e) => {
+        e.stopPropagation();
+        // Move subfolder to desktop root
+        subfolder.parentId = null;
+        folder.contents = folder.contents.filter(c => c !== sfId);
+        this.saveState();
+        this.updateFolderBadge(folder.id);
+        this.renderFolder(subfolder);
+        el.remove();
+        if (folder.contents.length === 0) {
+          container.innerHTML = '<div class="folder-empty-msg">Right-click to create a subfolder, or drag items here</div>';
+        }
+        this.showToast(`"${subfolder.name}" moved to desktop`);
+      };
+
+      container.appendChild(el);
+    });
+
+    // Render chats
+    chatUrls.forEach(url => {
       const chat = this.chats.find(c => c.url === url) || { url, title: 'Chat' };
 
       const el = document.createElement('div');
@@ -652,17 +896,14 @@ class GeminiDesktop {
         <div class="desktop-icon-label">${chat.title}</div>
       `;
 
-      el.ondblclick = () => {
-        this.toggleDesktop();
-        window.location.href = chat.url;
-      };
+      el.ondblclick = () => { this.toggleDesktop(); window.location.href = chat.url; };
 
       el.querySelector('.remove-from-folder-btn').onclick = (e) => {
         e.stopPropagation();
         this.removeFromFolder(chat.url, folder.id);
         el.remove();
         if (folder.contents.length === 0) {
-          container.innerHTML = '<div class="folder-empty-msg">Drop chats here to organize them</div>';
+          container.innerHTML = '<div class="folder-empty-msg">Right-click to create a subfolder, or drag items here</div>';
         }
       };
 
@@ -671,57 +912,44 @@ class GeminiDesktop {
   }
 
   removeFromFolder(chatUrl, folderId) {
-    const folder = this.folders.find(f => f.id === folderId);
+    const folder = this.getFolderById(folderId);
     if (folder) {
       folder.contents = folder.contents.filter(url => url !== chatUrl);
       this.saveState();
-
-      try {
-        const folderEl = document.querySelector(`[data-id="${CSS.escape(folderId)}"]`);
-        if (folderEl) folderEl.querySelector('.f-badge').textContent = folder.contents.length;
-      } catch(e) {}
-
+      this.updateFolderBadge(folderId);
       const chat = this.chats.find(c => c.url === chatUrl);
       if (chat) this.renderChat(chat);
       this.showToast('Chat removed from folder');
     }
   }
 
-  // ── Chat Extraction ────────────────────────────────
+  // ── Chat Extraction ─────────────────────────────────
   extractChats() {
     const chatLinks = document.querySelectorAll('a[href^="/app/"]');
     const newChats = [];
-
     chatLinks.forEach(el => {
       const url = el.getAttribute('href');
       if (url === '/app/' || url === '/app') return;
-
       const titleEl = el.querySelector('p, span, div.truncate') || el;
       const title = titleEl.innerText.trim() || 'Untitled Chat';
       const absUrl = new URL(url, window.location.origin).href;
-
-      if (!newChats.find(c => c.url === absUrl)) {
-        newChats.push({ url: absUrl, title });
-      }
+      if (!newChats.find(c => c.url === absUrl)) newChats.push({ url: absUrl, title });
     });
-
     this.chats = newChats;
     this.chats.forEach(chat => this.renderChat(chat));
   }
 
-  // ── Persistence ────────────────────────────────────
+  // ── Persistence ─────────────────────────────────────
   saveState() {
     if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
       chrome.storage.local.set({ geminiFolders: this.folders });
     }
   }
-
   saveChatPositions() {
     if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
       chrome.storage.local.set({ geminiChatPositions: this.chatPositions });
     }
   }
-
   loadState() {
     if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
       chrome.storage.local.get(['geminiFolders', 'geminiChatPositions'], (res) => {
@@ -737,13 +965,11 @@ class GeminiDesktop {
   }
 }
 
-// ── Bootstrap ──────────────────────────────────────
+// ── Bootstrap ───────────────────────────────────────
 (function boot() {
   if (window.__geminiDesktopBooted) return;
   window.__geminiDesktopBooted = true;
-
   function start() { new GeminiDesktop(); }
-
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', start);
   } else {

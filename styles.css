@@ -556,3 +556,46 @@
 .desktop-toast.removing {
   animation: slideOutToast 0.3s ease forwards;
 }
+
+/* ---- Breadcrumb Navigation ---- */
+.folder-window-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 400;
+  font-size: 13px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.breadcrumb-link {
+  color: var(--accent-hover);
+  cursor: pointer;
+  transition: color 0.15s;
+  font-weight: 500;
+}
+
+.breadcrumb-link:hover {
+  color: #c4b5fd;
+  text-decoration: underline;
+}
+
+.breadcrumb-sep {
+  color: var(--text-secondary);
+  opacity: 0.5;
+  font-size: 16px;
+  margin: 0 2px;
+  user-select: none;
+}
+
+.breadcrumb-current {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+/* Subfolder icon inside windows - slightly different color */
+.desktop-icon.static-icon .desktop-icon-svg:not(.chat-icon-svg) {
+  color: #6366f1;
+  fill: #6366f1;
+}
