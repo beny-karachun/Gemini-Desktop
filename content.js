@@ -160,10 +160,20 @@ class GeminiDesktop {
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
           Gemini Workspace
         </h1>
+        <div class="desktop-header-center">
+          <div class="search-bar" id="gd-search-bar">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input type="text" id="gd-search-input" placeholder="Search chats & folders..." autocomplete="off" />
+          </div>
+        </div>
         <div class="desktop-header-actions">
           <button class="scan-chats-btn" id="gd-scan-chats" title="Scroll through your chat list to discover all chat titles">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
             Scan All Chats
+          </button>
+          <button class="scan-chats-btn" id="gd-auto-arrange" title="Auto-arrange all icons into a tidy grid">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+            Arrange
           </button>
           <button class="close-desktop-btn" id="gd-close-desktop">&times;</button>
         </div>
@@ -174,6 +184,36 @@ class GeminiDesktop {
     this.workarea = document.getElementById('gd-workarea');
     document.getElementById('gd-close-desktop').onclick = () => this.toggleDesktop();
     document.getElementById('gd-scan-chats').onclick = () => this.scanAllChats();
+    document.getElementById('gd-auto-arrange').onclick = () => this.autoArrangeIcons();
+
+    // Search input with global dropdown
+    const searchInput = document.getElementById('gd-search-input');
+    const searchBar = document.getElementById('gd-search-bar');
+
+    // Create dropdown container
+    this.searchDropdown = document.createElement('div');
+    this.searchDropdown.className = 'search-dropdown';
+    this.searchDropdown.id = 'gd-search-dropdown';
+    searchBar.parentElement.appendChild(this.searchDropdown);
+
+    searchInput.addEventListener('input', () => this.onSearchInput(searchInput.value));
+    searchInput.addEventListener('focus', () => { if (searchInput.value.trim()) this.onSearchInput(searchInput.value); });
+    searchInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        searchInput.value = '';
+        this.closeSearchDropdown();
+        searchInput.blur();
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        const first = this.searchDropdown.querySelector('.search-result-item');
+        if (first) first.focus();
+      }
+    });
+
+    // Close dropdown when clicking outside
+    document.addEventListener('mousedown', (e) => {
+      if (!e.target.closest('.desktop-header-center')) this.closeSearchDropdown();
+    });
   }
 
   createContextMenu() {
@@ -339,6 +379,10 @@ class GeminiDesktop {
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>
         New Folder
       </div>
+      <div class="context-menu-item" data-action="arrange">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+        Auto-Arrange
+      </div>
       <div class="context-menu-item" data-action="refresh">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg>
         Refresh Chats
@@ -357,6 +401,7 @@ class GeminiDesktop {
       const action = ev.target.closest('.context-menu-item')?.dataset.action;
       this.contextMenu.classList.remove('active');
       if (action === 'new-folder') this.showNewFolderModal();
+      if (action === 'arrange') this.autoArrangeIcons();
       if (action === 'refresh') this.extractChats();
       if (action === 'close') this.toggleDesktop();
     };
@@ -999,6 +1044,210 @@ class GeminiDesktop {
       }
     }
     return { x: startX, y: startY };
+  }
+
+  // ── Auto-Arrange ────────────────────────────────────
+  autoArrangeIcons() {
+    const colWidth = 120, rowHeight = 110, startX = 30, startY = 20;
+    const maxCols = Math.max(1, Math.floor((this.workarea.clientWidth - 60) / colWidth));
+
+    // Get all desktop icons (not inside folder windows)
+    const icons = [...this.workarea.querySelectorAll(':scope > .desktop-icon')];
+
+    // Sort: folders first (alphabetically), then chats (alphabetically)
+    icons.sort((a, b) => {
+      const typeOrder = { folder: 0, chat: 1 };
+      const ta = typeOrder[a.dataset.type] ?? 1;
+      const tb = typeOrder[b.dataset.type] ?? 1;
+      if (ta !== tb) return ta - tb;
+      const la = a.querySelector('.desktop-icon-label')?.textContent || '';
+      const lb = b.querySelector('.desktop-icon-label')?.textContent || '';
+      return la.localeCompare(lb);
+    });
+
+    icons.forEach((icon, i) => {
+      const col = i % maxCols;
+      const row = Math.floor(i / maxCols);
+      const x = startX + col * colWidth;
+      const y = startY + row * rowHeight;
+
+      icon.style.transition = 'left 0.3s ease, top 0.3s ease';
+      icon.style.left = x + 'px';
+      icon.style.top = y + 'px';
+
+      // Save position
+      if (icon.dataset.type === 'chat') {
+        this.chatPositions[icon.dataset.id] = { x, y };
+      } else if (icon.dataset.type === 'folder') {
+        const folder = this.getFolderById(icon.dataset.id);
+        if (folder) { folder.x = x; folder.y = y; }
+      }
+
+      // Remove transition after animation
+      setTimeout(() => icon.style.transition = '', 350);
+    });
+
+    this.saveChatPositions();
+    this.saveState();
+    this.showToast(`${icons.length} items arranged`);
+  }
+
+  // ── Global Search ───────────────────────────────────
+  onSearchInput(query) {
+    const q = query.toLowerCase().trim();
+    if (!q) { this.closeSearchDropdown(); return; }
+
+    const results = [];
+    const MAX_RESULTS = 20;
+
+    // 1. Search desktop icons (chats not in folders)
+    this.chats.forEach(chat => {
+      if (results.length >= MAX_RESULTS) return;
+      const isInFolder = this.folders.some(f => f.contents.includes(chat.url));
+      if (isInFolder) return;
+      if (chat.title.toLowerCase().includes(q)) {
+        results.push({ type: 'chat', title: chat.title, url: chat.url, path: 'Desktop' });
+      }
+    });
+
+    // 2. Search folder names and chats inside folders (recursive)
+    const searchFolder = (folder, pathParts) => {
+      const currentPath = [...pathParts, folder.name];
+
+      // Match folder name
+      if (folder.name.toLowerCase().includes(q) && results.length < MAX_RESULTS) {
+        results.push({ type: 'folder', title: folder.name, folderId: folder.id, path: pathParts.join(' › ') || 'Desktop' });
+      }
+
+      // Search chats inside this folder
+      folder.contents.forEach(item => {
+        if (results.length >= MAX_RESULTS) return;
+        if (item.startsWith('folder-')) {
+          const sub = this.getFolderById(item);
+          if (sub) searchFolder(sub, currentPath);
+        } else {
+          const title = this.getChatTitle(item);
+          if (title.toLowerCase().includes(q)) {
+            results.push({ type: 'chat-in-folder', title, url: item, folderId: folder.id, path: currentPath.join(' › ') });
+          }
+        }
+      });
+    };
+
+    this.folders.filter(f => !f.parentId).forEach(f => searchFolder(f, []));
+
+    this.showSearchDropdown(results, q);
+  }
+
+  showSearchDropdown(results, query) {
+    if (!this.searchDropdown) return;
+
+    if (results.length === 0) {
+      this.searchDropdown.innerHTML = '<div class="search-no-results">No results found</div>';
+      this.searchDropdown.classList.add('active');
+      return;
+    }
+
+    this.searchDropdown.innerHTML = results.map((r, i) => {
+      const icon = r.type === 'folder'
+        ? '<svg width="16" height="16" viewBox="0 0 24 24" fill="#3b82f6" stroke="none"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>'
+        : '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
+
+      // Highlight the matching text
+      const title = this.highlightMatch(r.title, query);
+
+      return `
+        <div class="search-result-item" tabindex="0" data-index="${i}" data-type="${r.type}" data-url="${r.url || ''}" data-folder-id="${r.folderId || ''}">
+          <div class="search-result-icon">${icon}</div>
+          <div class="search-result-info">
+            <div class="search-result-title">${title}</div>
+            <div class="search-result-path">${r.path}</div>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    this.searchDropdown.classList.add('active');
+
+    // Click handlers
+    this.searchDropdown.querySelectorAll('.search-result-item').forEach(item => {
+      item.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        this.handleSearchResultClick(item);
+      });
+      item.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') this.handleSearchResultClick(item);
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          const next = item.nextElementSibling;
+          if (next) next.focus();
+        }
+        if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          const prev = item.previousElementSibling;
+          if (prev) prev.focus();
+          else document.getElementById('gd-search-input')?.focus();
+        }
+        if (e.key === 'Escape') {
+          this.closeSearchDropdown();
+          document.getElementById('gd-search-input')?.focus();
+        }
+      });
+    });
+  }
+
+  handleSearchResultClick(item) {
+    const type = item.dataset.type;
+    const url = item.dataset.url;
+    const folderId = item.dataset.folderId;
+
+    this.closeSearchDropdown();
+    document.getElementById('gd-search-input').value = '';
+
+    if (type === 'chat') {
+      // Desktop chat — scroll to it and highlight
+      const icon = this.workarea.querySelector(`[data-id="${CSS.escape(url)}"]`);
+      if (icon) {
+        icon.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        icon.classList.add('search-highlight');
+        setTimeout(() => icon.classList.remove('search-highlight'), 2000);
+      }
+    } else if (type === 'folder') {
+      // Open the folder window
+      const folder = this.getFolderById(folderId);
+      if (folder) this.openFolderWindow(folder);
+    } else if (type === 'chat-in-folder') {
+      // Open the containing folder, then highlight the chat
+      const folder = this.getFolderById(folderId);
+      if (folder) {
+        this.openFolderWindow(folder);
+        // After render, highlight the matching chat in the window
+        setTimeout(() => {
+          const win = document.getElementById(`window-${folderId}`);
+          if (win) {
+            const chatEl = win.querySelector(`[data-id="${CSS.escape(url)}"]`);
+            if (chatEl) {
+              chatEl.classList.add('search-highlight');
+              chatEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              setTimeout(() => chatEl.classList.remove('search-highlight'), 2000);
+            }
+          }
+        }, 100);
+      }
+    }
+  }
+
+  highlightMatch(text, query) {
+    const idx = text.toLowerCase().indexOf(query.toLowerCase());
+    if (idx === -1) return text;
+    const before = text.slice(0, idx);
+    const match = text.slice(idx, idx + query.length);
+    const after = text.slice(idx + query.length);
+    return `${before}<mark>${match}</mark>${after}`;
+  }
+
+  closeSearchDropdown() {
+    if (this.searchDropdown) this.searchDropdown.classList.remove('active');
   }
 
   // ── Folder Window with Breadcrumb ───────────────────
