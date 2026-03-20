@@ -188,6 +188,23 @@
   transform: scale(1.06);
 }
 
+.desktop-icon.selected {
+  background: rgba(59, 130, 246, 0.15);
+  outline: 2px solid rgba(59, 130, 246, 0.5);
+  outline-offset: -2px;
+  border-radius: 12px;
+}
+
+/* ---- Rubber Band Selection ---- */
+.selection-band {
+  position: absolute;
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.4);
+  border-radius: 3px;
+  pointer-events: none;
+  z-index: 9998;
+}
+
 .desktop-icon-svg {
   width: 48px;
   height: 48px;

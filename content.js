@@ -6,8 +6,9 @@ class GeminiDesktop {
     this.isDesktopActive = false;
     this.draggedEl = null;
     this.newFolderTarget = { x: 0, y: 0 };
-    this.newFolderParentId = null; // for subfolders
+    this.newFolderParentId = null;
     this.zIndexCounter = 100;
+    this.selectedIcons = new Set(); // multi-selection
 
     this.init();
   }
@@ -197,15 +198,39 @@ class GeminiDesktop {
     });
   }
 
+  // ── Selection ────────────────────────────────────────
+  clearSelection() {
+    this.selectedIcons.forEach(el => el.classList.remove('selected'));
+    this.selectedIcons.clear();
+  }
+
+  selectIcon(el) {
+    el.classList.add('selected');
+    this.selectedIcons.add(el);
+  }
+
+  deselectIcon(el) {
+    el.classList.remove('selected');
+    this.selectedIcons.delete(el);
+  }
+
+  toggleSelectIcon(el) {
+    if (this.selectedIcons.has(el)) this.deselectIcon(el);
+    else this.selectIcon(el);
+  }
+
+  getSelectedDesktopIcons() {
+    return [...this.selectedIcons].filter(el => el.parentElement === this.workarea);
+  }
+
   // ── Global Events ───────────────────────────────────
   bindGlobalEvents() {
+    // Right-click
     this.workarea.addEventListener('contextmenu', (e) => {
       e.preventDefault();
       e.stopPropagation();
-
       const icon = e.target.closest('.desktop-icon');
       const win = e.target.closest('.folder-window');
-
       if (icon && icon.dataset.type === 'folder') {
         this.showFolderContextMenu(e, icon);
       } else if (icon && icon.dataset.type === 'chat') {
@@ -215,10 +240,69 @@ class GeminiDesktop {
       }
     });
 
+    // Dismiss context menu
     document.addEventListener('click', (e) => {
       if (!e.target.closest('.desktop-context-menu')) {
         this.contextMenu.classList.remove('active');
       }
+    });
+
+    // Rubber band selection on empty space
+    this.workarea.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      const icon = e.target.closest('.desktop-icon');
+      const win = e.target.closest('.folder-window');
+      if (icon || win) return; // only on blank space
+
+      // If not holding Ctrl, clear existing selection
+      if (!e.ctrlKey && !e.metaKey) this.clearSelection();
+
+      const workRect = this.workarea.getBoundingClientRect();
+      const startX = e.clientX - workRect.left;
+      const startY = e.clientY - workRect.top;
+      let band = null;
+
+      const onMove = (me) => {
+        const curX = me.clientX - workRect.left;
+        const curY = me.clientY - workRect.top;
+        const dx = Math.abs(curX - startX);
+        const dy = Math.abs(curY - startY);
+        if (!band && dx < 4 && dy < 4) return;
+
+        if (!band) {
+          band = document.createElement('div');
+          band.className = 'selection-band';
+          this.workarea.appendChild(band);
+        }
+
+        const left = Math.min(startX, curX);
+        const top = Math.min(startY, curY);
+        band.style.left = left + 'px';
+        band.style.top = top + 'px';
+        band.style.width = dx + 'px';
+        band.style.height = dy + 'px';
+
+        // Highlight icons that intersect the band
+        const bandRect = { left, top, right: left + dx, bottom: top + dy };
+        this.workarea.querySelectorAll('.desktop-icon:not(.folder-window .desktop-icon)').forEach(icon => {
+          const ix = parseInt(icon.style.left) || 0;
+          const iy = parseInt(icon.style.top) || 0;
+          const iw = icon.offsetWidth;
+          const ih = icon.offsetHeight;
+          const intersects = ix + iw > bandRect.left && ix < bandRect.right && iy + ih > bandRect.top && iy < bandRect.bottom;
+          if (intersects) this.selectIcon(icon);
+          else if (!e.ctrlKey && !e.metaKey) this.deselectIcon(icon);
+        });
+      };
+
+      const onUp = () => {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        if (band) band.remove();
+      };
+
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
     });
   }
 
@@ -489,43 +573,60 @@ class GeminiDesktop {
       if (e.button !== 0) return;
       e.preventDefault();
       this.bringToFront(el);
+
+      // Handle selection on mousedown
+      if (e.ctrlKey || e.metaKey) {
+        this.toggleSelectIcon(el);
+      } else if (!this.selectedIcons.has(el)) {
+        this.clearSelection();
+        this.selectIcon(el);
+      }
+      // If already selected (no Ctrl), keep selection for multi-drag
+
       const startMouseX = e.clientX, startMouseY = e.clientY;
-      const bounds = el.getBoundingClientRect();
-      const workBounds = this.workarea.getBoundingClientRect();
-      const startX = bounds.left - workBounds.left;
-      const startY = bounds.top - workBounds.top;
       let moved = false;
       this.draggedEl = el;
-      el.classList.add('dragging');
+
+      // Snapshot start positions for all selected desktop icons
+      const selected = this.getSelectedDesktopIcons();
+      const startPositions = selected.map(icon => ({
+        el: icon,
+        x: parseInt(icon.style.left) || 0,
+        y: parseInt(icon.style.top) || 0
+      }));
 
       const onMove = (me) => {
+        const dx = me.clientX - startMouseX;
+        const dy = me.clientY - startMouseY;
+        if (!moved && Math.abs(dx) < 3 && Math.abs(dy) < 3) return;
         moved = true;
-        el.style.left = (startX + me.clientX - startMouseX) + 'px';
-        el.style.top  = (startY + me.clientY - startMouseY) + 'px';
 
-        // Highlight drop targets (folder icons AND open folder windows)
-        const draggingType = el.dataset.type;
-        if (draggingType === 'chat' || draggingType === 'folder') {
-          el.style.display = 'none';
-          const targets = document.elementsFromPoint(me.clientX, me.clientY);
-          el.style.display = '';
-          this.workarea.querySelectorAll('.drop-target').forEach(dt => dt.classList.remove('drop-target'));
-          this.workarea.querySelectorAll('.folder-window.window-drop-target').forEach(w => w.classList.remove('window-drop-target'));
+        // Move all selected icons
+        startPositions.forEach(sp => {
+          sp.el.style.left = (sp.x + dx) + 'px';
+          sp.el.style.top  = (sp.y + dy) + 'px';
+          sp.el.classList.add('dragging');
+        });
 
-          // Check for folder icon targets first
-          const folderTarget = targets.find(t => t.dataset && t.dataset.type === 'folder' && t.dataset.id !== el.dataset.id);
-          if (folderTarget) {
-            folderTarget.classList.add('drop-target');
-          } else {
-            // Check if hovering over an open folder window's content area
-            const windowTarget = targets.find(t => t.closest && t.closest('.folder-window'));
-            if (windowTarget) {
-              const folderWin = windowTarget.closest('.folder-window');
-              // Get the folder id from the window id (window-{folderId})
-              const winFolderId = folderWin.id.replace('window-', '');
-              if (winFolderId !== el.dataset.id) {
-                folderWin.classList.add('window-drop-target');
-              }
+        // Highlight drop targets
+        selected.forEach(s => s.style.display = 'none');
+        const targets = document.elementsFromPoint(me.clientX, me.clientY);
+        selected.forEach(s => s.style.display = '');
+
+        this.workarea.querySelectorAll('.drop-target').forEach(dt => dt.classList.remove('drop-target'));
+        this.workarea.querySelectorAll('.folder-window.window-drop-target').forEach(w => w.classList.remove('window-drop-target'));
+
+        const allDragIds = new Set(selected.map(s => s.dataset.id));
+        const folderTarget = targets.find(t => t.dataset && t.dataset.type === 'folder' && !allDragIds.has(t.dataset.id));
+        if (folderTarget) {
+          folderTarget.classList.add('drop-target');
+        } else {
+          const windowTarget = targets.find(t => t.closest && t.closest('.folder-window'));
+          if (windowTarget) {
+            const folderWin = windowTarget.closest('.folder-window');
+            const winFolderId = folderWin.id.replace('window-', '');
+            if (!allDragIds.has(winFolderId)) {
+              folderWin.classList.add('window-drop-target');
             }
           }
         }
@@ -534,10 +635,18 @@ class GeminiDesktop {
       const onUp = (ue) => {
         document.removeEventListener('mousemove', onMove);
         document.removeEventListener('mouseup', onUp);
-        el.classList.remove('dragging');
+        startPositions.forEach(sp => sp.el.classList.remove('dragging'));
         this.workarea.querySelectorAll('.drop-target').forEach(dt => dt.classList.remove('drop-target'));
         this.workarea.querySelectorAll('.folder-window.window-drop-target').forEach(w => w.classList.remove('window-drop-target'));
-        if (moved) this.handleDrop(el, ue.clientX, ue.clientY);
+
+        if (moved) {
+          this.handleDrop(el, ue.clientX, ue.clientY);
+        } else if (!e.ctrlKey && !e.metaKey) {
+          // Simple click without move = select only this
+          this.clearSelection();
+          this.selectIcon(el);
+        }
+
         if (onDragEnd) onDragEnd(el);
       };
 
@@ -548,25 +657,29 @@ class GeminiDesktop {
 
   handleDrop(el, clientX, clientY) {
     this.draggedEl = null;
-    const dragType = el.dataset.type;
-    const dragId = el.dataset.id;
+    const selected = this.getSelectedDesktopIcons();
+    const allDragIds = new Set(selected.map(s => s.dataset.id));
 
-    el.style.display = 'none';
+    // Hide all selected to detect what's underneath
+    selected.forEach(s => s.style.display = 'none');
     const dropTargets = document.elementsFromPoint(clientX, clientY);
-    el.style.display = '';
+    selected.forEach(s => s.style.display = '');
 
-    // Priority 1: Dropped on a folder icon on the desktop
-    const targetFolderEl = dropTargets.find(t => t.dataset && t.dataset.type === 'folder' && t.dataset.id !== dragId);
-
+    // Priority 1: Dropped on a folder icon
+    const targetFolderEl = dropTargets.find(t => t.dataset && t.dataset.type === 'folder' && !allDragIds.has(t.dataset.id));
     if (targetFolderEl) {
       const targetFolderId = targetFolderEl.dataset.id;
-      if (dragType === 'chat') {
-        this.moveChatToFolder(dragId, targetFolderId);
-        el.remove();
-        this.showToast('Chat moved to folder');
-      } else if (dragType === 'folder') {
-        this.moveFolderToFolder(dragId, targetFolderId);
-      }
+      let count = 0;
+      selected.forEach(icon => {
+        if (icon.dataset.type === 'chat') {
+          this.moveChatToFolder(icon.dataset.id, targetFolderId);
+          icon.remove(); count++;
+        } else if (icon.dataset.type === 'folder') {
+          this.moveFolderToFolder(icon.dataset.id, targetFolderId); count++;
+        }
+      });
+      this.clearSelection();
+      this.showToast(`${count} item${count > 1 ? 's' : ''} moved to folder`);
       return;
     }
 
@@ -575,16 +688,38 @@ class GeminiDesktop {
     if (windowTarget) {
       const folderWin = windowTarget.closest('.folder-window');
       const winFolderId = folderWin.id.replace('window-', '');
-      if (winFolderId !== dragId) {
-        if (dragType === 'chat') {
-          this.moveChatToFolder(dragId, winFolderId);
-          el.remove();
-          this.showToast('Chat moved to folder');
-        } else if (dragType === 'folder') {
-          this.moveFolderToFolder(dragId, winFolderId);
-        }
+      if (!allDragIds.has(winFolderId)) {
+        let count = 0;
+        selected.forEach(icon => {
+          if (icon.dataset.type === 'chat') {
+            this.moveChatToFolder(icon.dataset.id, winFolderId);
+            icon.remove(); count++;
+          } else if (icon.dataset.type === 'folder') {
+            this.moveFolderToFolder(icon.dataset.id, winFolderId); count++;
+          }
+        });
+        this.clearSelection();
+        this.showToast(`${count} item${count > 1 ? 's' : ''} moved to folder`);
+        return;
       }
     }
+
+    // No folder target: save new positions for all moved items
+    selected.forEach(icon => {
+      if (icon.dataset.type === 'chat') {
+        this.chatPositions[icon.dataset.id] = {
+          x: parseInt(icon.style.left) || 0, y: parseInt(icon.style.top) || 0
+        };
+        this.saveChatPositions();
+      } else if (icon.dataset.type === 'folder') {
+        const folder = this.getFolderById(icon.dataset.id);
+        if (folder) {
+          folder.x = parseInt(icon.style.left) || 0;
+          folder.y = parseInt(icon.style.top) || 0;
+        }
+        this.saveState();
+      }
+    });
   }
 
   moveChatToFolder(chatUrl, folderId) {
