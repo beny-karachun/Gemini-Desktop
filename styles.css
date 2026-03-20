@@ -623,10 +623,10 @@
   fill: #6366f1;
 }
 
-/* Ghost element during in-window drag */
-.dragging-ghost {
+/* Ghost element during in-window drag — must beat .static-icon specificity */
+.desktop-icon.dragging-ghost {
   position: fixed !important;
-  left: auto !important;
-  top: auto !important;
   transition: none !important;
+  margin: 0 !important;
+  cursor: grabbing !important;
 }

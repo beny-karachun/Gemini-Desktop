@@ -995,177 +995,251 @@ class GeminiDesktop {
     this.positionContextMenu(e);
   }
 
-  // Drag items inside a folder window onto subfolder targets
+  // Drag items inside a folder window onto subfolder targets (with multi-select)
   makeInWindowDraggable(el, itemId, itemType, currentFolder, win) {
-    let ghost = null, startX = 0, startY = 0, moved = false;
-
     const onMouseDown = (e) => {
-      // Ignore if clicking the remove button
       if (e.target.closest('.remove-from-folder-btn')) return;
       if (e.button !== 0) return;
       e.preventDefault();
       e.stopPropagation();
 
-      startX = e.clientX;
-      startY = e.clientY;
-      moved = false;
+      const content = win.querySelector('.folder-window-content');
+
+      // Handle selection
+      if (e.ctrlKey || e.metaKey) {
+        this.toggleSelectIcon(el);
+      } else if (!this.selectedIcons.has(el)) {
+        // Clear selection for items in THIS window only
+        content.querySelectorAll('.desktop-icon.selected').forEach(ic => this.deselectIcon(ic));
+        this.selectIcon(el);
+      }
+
+      // Gather all selected items in this window's content
+      const getSelected = () => [...this.selectedIcons].filter(ic => ic.parentElement === content);
+
+      const startX = e.clientX, startY = e.clientY;
+      let moved = false, ghost = null;
 
       const onMove = (me) => {
         const dx = me.clientX - startX;
         const dy = me.clientY - startY;
-
-        // Require a small drag threshold before activating
         if (!moved && Math.abs(dx) < 5 && Math.abs(dy) < 5) return;
 
         if (!moved) {
           moved = true;
+          const sel = getSelected();
+          // Create a ghost clone — use 'dragging-ghost' only, NOT 'static-icon'
+          // (static-icon has position:relative !important which breaks fixed positioning)
           ghost = el.cloneNode(true);
-          ghost.className = 'desktop-icon static-icon dragging-ghost';
-          ghost.style.position = 'fixed';
-          ghost.style.pointerEvents = 'none';
-          ghost.style.zIndex = '2147483647';
-          ghost.style.opacity = '0.85';
-          ghost.style.transform = 'scale(1.08)';
-          ghost.style.filter = 'drop-shadow(0 8px 16px rgba(0,0,0,0.5))';
-          ghost.style.width = el.offsetWidth + 'px';
+          ghost.className = 'desktop-icon dragging-ghost';
+          ghost.style.cssText = `
+            position: fixed !important;
+            pointer-events: none !important;
+            z-index: 2147483647 !important;
+            opacity: 0.85 !important;
+            transform: scale(1.08) !important;
+            filter: drop-shadow(0 8px 16px rgba(0,0,0,0.5)) !important;
+            width: ${el.offsetWidth}px !important;
+            margin: 0 !important;
+            transition: none !important;
+          `;
+          if (sel.length > 1) {
+            const badge = document.createElement('div');
+            badge.className = 'f-badge';
+            badge.style.cssText = 'position:absolute;top:-4px;left:-4px;background:#3b82f6;';
+            badge.textContent = sel.length;
+            ghost.appendChild(badge);
+          }
           document.documentElement.appendChild(ghost);
-          el.style.opacity = '0.3';
+          sel.forEach(s => s.style.opacity = '0.3');
         }
 
-        ghost.style.left = (me.clientX - el.offsetWidth / 2) + 'px';
-        ghost.style.top = (me.clientY - el.offsetHeight / 2) + 'px';
+        ghost.style.setProperty('left', (me.clientX - el.offsetWidth / 2) + 'px', 'important');
+        ghost.style.setProperty('top', (me.clientY - el.offsetHeight / 2) + 'px', 'important');
 
-        // Clear all highlights everywhere
+        // Highlight targets
         this.workarea.querySelectorAll('.drop-target').forEach(dt => dt.classList.remove('drop-target'));
+        this.workarea.querySelectorAll('.folder-window.window-drop-target').forEach(w => w.classList.remove('window-drop-target'));
 
         const targets = document.elementsFromPoint(me.clientX, me.clientY);
+        const currentSel = getSelected();
+        const dragIds = new Set(currentSel.map(s => s.dataset.id));
 
-        // Check for subfolder targets inside the window
-        const subfolderTarget = targets.find(t =>
-          t.dataset && t.dataset.type === 'subfolder-in-window' && t.dataset.id !== itemId
+        // Subfolder in same window
+        const sfTarget = targets.find(t =>
+          t.dataset && t.dataset.type === 'subfolder-in-window' && !dragIds.has(t.dataset.id)
         );
-        if (subfolderTarget) { subfolderTarget.classList.add('drop-target'); return; }
+        if (sfTarget) { sfTarget.classList.add('drop-target'); return; }
 
-        // Check for desktop folder targets (dragging out onto a folder on the desktop)
-        const desktopFolderTarget = targets.find(t =>
-          t.dataset && t.dataset.type === 'folder' && t.dataset.id !== itemId && t.dataset.id !== currentFolder.id
+        // Desktop folder icon
+        const deskTarget = targets.find(t =>
+          t.dataset && t.dataset.type === 'folder' && !dragIds.has(t.dataset.id) && t.dataset.id !== currentFolder.id
         );
-        if (desktopFolderTarget) desktopFolderTarget.classList.add('drop-target');
+        if (deskTarget) { deskTarget.classList.add('drop-target'); return; }
+
+        // Another open folder window
+        const winTarget = targets.find(t => t.closest && t.closest('.folder-window') && t.closest('.folder-window') !== win);
+        if (winTarget) {
+          winTarget.closest('.folder-window').classList.add('window-drop-target');
+        }
       };
 
       const onUp = (ue) => {
         document.removeEventListener('mousemove', onMove);
         document.removeEventListener('mouseup', onUp);
 
+        const selected = getSelected();
         if (ghost) { ghost.remove(); ghost = null; }
-        el.style.opacity = '';
-
+        selected.forEach(s => s.style.opacity = '');
         this.workarea.querySelectorAll('.drop-target').forEach(dt => dt.classList.remove('drop-target'));
+        this.workarea.querySelectorAll('.folder-window.window-drop-target').forEach(w => w.classList.remove('window-drop-target'));
 
-        if (!moved) return;
+        if (!moved) {
+          if (!e.ctrlKey && !e.metaKey) {
+            content.querySelectorAll('.desktop-icon.selected').forEach(ic => this.deselectIcon(ic));
+            this.selectIcon(el);
+          }
+          return;
+        }
 
         const targets = document.elementsFromPoint(ue.clientX, ue.clientY);
+        const dragIds = new Set(selected.map(s => s.dataset.id));
 
-        // Priority 1: Dropped on a subfolder inside the same window
-        const subfolderTarget = targets.find(t =>
-          t.dataset && t.dataset.type === 'subfolder-in-window' && t.dataset.id !== itemId
+        // Helper to move one item out of currentFolder
+        const moveItem = (icon) => {
+          const id = icon.dataset.id;
+          const type = icon.dataset.type === 'subfolder-in-window' ? 'subfolder' : 'chat';
+          return { id, type };
+        };
+
+        // Priority 1: Subfolder in same window
+        const sfTarget = targets.find(t =>
+          t.dataset && t.dataset.type === 'subfolder-in-window' && !dragIds.has(t.dataset.id)
         );
-
-        if (subfolderTarget) {
-          const targetFolderId = subfolderTarget.dataset.id;
-          if (itemType === 'chat') {
-            currentFolder.contents = currentFolder.contents.filter(c => c !== itemId);
-            const targetFolder = this.getFolderById(targetFolderId);
-            if (targetFolder && !targetFolder.contents.includes(itemId)) targetFolder.contents.push(itemId);
-            this.saveState();
-            this.updateFolderBadge(currentFolder.id);
-            this.updateFolderBadge(targetFolderId);
-            this.refreshFolderWindow(currentFolder.id);
-            this.showToast('Chat moved to subfolder');
-          } else if (itemType === 'subfolder') {
-            const source = this.getFolderById(itemId);
-            if (source && !this.isDescendant(itemId, targetFolderId) && itemId !== targetFolderId) {
-              currentFolder.contents = currentFolder.contents.filter(c => c !== itemId);
-              source.parentId = targetFolderId;
-              const targetFolder = this.getFolderById(targetFolderId);
-              if (targetFolder && !targetFolder.contents.includes(itemId)) targetFolder.contents.push(itemId);
-              this.saveState();
-              this.updateFolderBadge(currentFolder.id);
-              this.updateFolderBadge(targetFolderId);
-              this.refreshFolderWindow(currentFolder.id);
-              this.showToast(`"${source.name}" moved to subfolder`);
+        if (sfTarget) {
+          const targetFolderId = sfTarget.dataset.id;
+          const targetFolder = this.getFolderById(targetFolderId);
+          let count = 0;
+          selected.forEach(icon => {
+            const { id, type } = moveItem(icon);
+            if (type === 'chat') {
+              currentFolder.contents = currentFolder.contents.filter(c => c !== id);
+              if (targetFolder && !targetFolder.contents.includes(id)) { targetFolder.contents.push(id); count++; }
             } else {
-              this.showToast("Can't move a folder into its own subfolder");
+              const src = this.getFolderById(id);
+              if (src && !this.isDescendant(id, targetFolderId) && id !== targetFolderId) {
+                currentFolder.contents = currentFolder.contents.filter(c => c !== id);
+                src.parentId = targetFolderId;
+                if (targetFolder && !targetFolder.contents.includes(id)) targetFolder.contents.push(id);
+                count++;
+              }
             }
-          }
+          });
+          this.saveState();
+          this.updateFolderBadge(currentFolder.id);
+          this.updateFolderBadge(targetFolderId);
+          this.clearSelection();
+          this.refreshFolderWindow(currentFolder.id);
+          this.showToast(`${count} item${count > 1 ? 's' : ''} moved to subfolder`);
           return;
         }
 
-        // Priority 2: Dropped on a desktop folder icon (different from current)
-        const desktopFolderTarget = targets.find(t =>
-          t.dataset && t.dataset.type === 'folder' && t.dataset.id !== itemId && t.dataset.id !== currentFolder.id
+        // Priority 2: Desktop folder icon
+        const deskTarget = targets.find(t =>
+          t.dataset && t.dataset.type === 'folder' && !dragIds.has(t.dataset.id) && t.dataset.id !== currentFolder.id
         );
-
-        if (desktopFolderTarget) {
-          const targetFolderId = desktopFolderTarget.dataset.id;
-          if (itemType === 'chat') {
-            currentFolder.contents = currentFolder.contents.filter(c => c !== itemId);
-            const targetFolder = this.getFolderById(targetFolderId);
-            if (targetFolder && !targetFolder.contents.includes(itemId)) targetFolder.contents.push(itemId);
-            this.saveState();
-            this.updateFolderBadge(currentFolder.id);
-            this.updateFolderBadge(targetFolderId);
-            this.refreshFolderWindow(currentFolder.id);
-            this.showToast('Chat moved to folder');
-          } else if (itemType === 'subfolder') {
-            const source = this.getFolderById(itemId);
-            if (source && !this.isDescendant(itemId, targetFolderId) && itemId !== targetFolderId) {
-              currentFolder.contents = currentFolder.contents.filter(c => c !== itemId);
-              source.parentId = targetFolderId;
-              const targetFolder = this.getFolderById(targetFolderId);
-              if (targetFolder && !targetFolder.contents.includes(itemId)) targetFolder.contents.push(itemId);
-              this.saveState();
-              this.updateFolderBadge(currentFolder.id);
-              this.updateFolderBadge(targetFolderId);
-              this.refreshFolderWindow(currentFolder.id);
-              this.showToast(`"${source.name}" moved to folder`);
+        if (deskTarget) {
+          const targetFolderId = deskTarget.dataset.id;
+          let count = 0;
+          selected.forEach(icon => {
+            const { id, type } = moveItem(icon);
+            if (type === 'chat') {
+              currentFolder.contents = currentFolder.contents.filter(c => c !== id);
+              this.moveChatToFolder(id, targetFolderId);
+              count++;
+            } else {
+              currentFolder.contents = currentFolder.contents.filter(c => c !== id);
+              const src = this.getFolderById(id);
+              if (src) { src.parentId = targetFolderId; }
+              const tf = this.getFolderById(targetFolderId);
+              if (tf && !tf.contents.includes(id)) tf.contents.push(id);
+              count++;
             }
-          }
+          });
+          this.saveState();
+          this.updateFolderBadge(currentFolder.id);
+          this.updateFolderBadge(targetFolderId);
+          this.clearSelection();
+          this.refreshFolderWindow(currentFolder.id);
+          this.showToast(`${count} item${count > 1 ? 's' : ''} moved to folder`);
           return;
         }
 
-        // Priority 3: Dropped on the bare desktop (outside ANY folder window)
+        // Priority 3: Another open folder window
+        const winTarget = targets.find(t => t.closest && t.closest('.folder-window') && t.closest('.folder-window') !== win);
+        if (winTarget) {
+          const targetWin = winTarget.closest('.folder-window');
+          const targetFolderId = targetWin.id.replace('window-', '');
+          let count = 0;
+          selected.forEach(icon => {
+            const { id, type } = moveItem(icon);
+            if (type === 'chat') {
+              currentFolder.contents = currentFolder.contents.filter(c => c !== id);
+              const tf = this.getFolderById(targetFolderId);
+              if (tf && !tf.contents.includes(id)) { tf.contents.push(id); count++; }
+            } else {
+              const src = this.getFolderById(id);
+              if (src && !this.isDescendant(id, targetFolderId) && id !== targetFolderId) {
+                currentFolder.contents = currentFolder.contents.filter(c => c !== id);
+                src.parentId = targetFolderId;
+                const tf = this.getFolderById(targetFolderId);
+                if (tf && !tf.contents.includes(id)) tf.contents.push(id);
+                count++;
+              }
+            }
+          });
+          this.saveState();
+          this.updateFolderBadge(currentFolder.id);
+          this.updateFolderBadge(targetFolderId);
+          this.clearSelection();
+          this.refreshFolderWindow(currentFolder.id);
+          this.refreshFolderWindow(targetFolderId);
+          this.showToast(`${count} item${count > 1 ? 's' : ''} moved`);
+          return;
+        }
+
+        // Priority 4: Bare desktop
         const isOverWindow = targets.find(t => t.closest && t.closest('.folder-window'));
         if (!isOverWindow) {
           const workRect = this.workarea.getBoundingClientRect();
-          const dropX = ue.clientX - workRect.left - 50;
-          const dropY = ue.clientY - workRect.top - 50;
-
-          if (itemType === 'chat') {
-            currentFolder.contents = currentFolder.contents.filter(c => c !== itemId);
-            this.saveState();
-            this.updateFolderBadge(currentFolder.id);
-            this.refreshFolderWindow(currentFolder.id);
-            // Place on desktop at drop position
-            this.chatPositions[itemId] = { x: Math.max(0, dropX), y: Math.max(0, dropY) };
-            this.saveChatPositions();
-            const chat = this.chats.find(c => c.url === itemId) || { url: itemId, title: 'Chat' };
-            this.renderChat(chat);
-            this.showToast('Chat moved to desktop');
-          } else if (itemType === 'subfolder') {
-            const source = this.getFolderById(itemId);
-            if (source) {
-              currentFolder.contents = currentFolder.contents.filter(c => c !== itemId);
-              source.parentId = null;
-              source.x = Math.max(0, dropX);
-              source.y = Math.max(0, dropY);
-              this.saveState();
-              this.updateFolderBadge(currentFolder.id);
-              this.refreshFolderWindow(currentFolder.id);
-              this.renderFolder(source);
-              this.showToast(`"${source.name}" moved to desktop`);
+          let offsetIdx = 0;
+          selected.forEach(icon => {
+            const { id, type } = moveItem(icon);
+            const dropX = ue.clientX - workRect.left - 50 + (offsetIdx * 120);
+            const dropY = ue.clientY - workRect.top - 50;
+            if (type === 'chat') {
+              currentFolder.contents = currentFolder.contents.filter(c => c !== id);
+              this.chatPositions[id] = { x: Math.max(0, dropX), y: Math.max(0, dropY) };
+              this.saveChatPositions();
+              const chat = this.chats.find(c => c.url === id) || { url: id, title: 'Chat' };
+              this.renderChat(chat);
+            } else {
+              const src = this.getFolderById(id);
+              if (src) {
+                currentFolder.contents = currentFolder.contents.filter(c => c !== id);
+                src.parentId = null;
+                src.x = Math.max(0, dropX);
+                src.y = Math.max(0, dropY);
+                this.renderFolder(src);
+              }
             }
-          }
+            offsetIdx++;
+          });
+          this.saveState();
+          this.updateFolderBadge(currentFolder.id);
+          this.clearSelection();
+          this.refreshFolderWindow(currentFolder.id);
+          this.showToast(`${offsetIdx} item${offsetIdx > 1 ? 's' : ''} moved to desktop`);
         }
       };
 
