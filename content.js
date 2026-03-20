@@ -503,15 +503,31 @@ class GeminiDesktop {
         el.style.left = (startX + me.clientX - startMouseX) + 'px';
         el.style.top  = (startY + me.clientY - startMouseY) + 'px';
 
-        // Highlight drop targets (chats → folders, folders → folders)
+        // Highlight drop targets (folder icons AND open folder windows)
         const draggingType = el.dataset.type;
         if (draggingType === 'chat' || draggingType === 'folder') {
           el.style.display = 'none';
           const targets = document.elementsFromPoint(me.clientX, me.clientY);
           el.style.display = '';
           this.workarea.querySelectorAll('.drop-target').forEach(dt => dt.classList.remove('drop-target'));
+          this.workarea.querySelectorAll('.folder-window.window-drop-target').forEach(w => w.classList.remove('window-drop-target'));
+
+          // Check for folder icon targets first
           const folderTarget = targets.find(t => t.dataset && t.dataset.type === 'folder' && t.dataset.id !== el.dataset.id);
-          if (folderTarget) folderTarget.classList.add('drop-target');
+          if (folderTarget) {
+            folderTarget.classList.add('drop-target');
+          } else {
+            // Check if hovering over an open folder window's content area
+            const windowTarget = targets.find(t => t.closest && t.closest('.folder-window'));
+            if (windowTarget) {
+              const folderWin = windowTarget.closest('.folder-window');
+              // Get the folder id from the window id (window-{folderId})
+              const winFolderId = folderWin.id.replace('window-', '');
+              if (winFolderId !== el.dataset.id) {
+                folderWin.classList.add('window-drop-target');
+              }
+            }
+          }
         }
       };
 
@@ -520,6 +536,7 @@ class GeminiDesktop {
         document.removeEventListener('mouseup', onUp);
         el.classList.remove('dragging');
         this.workarea.querySelectorAll('.drop-target').forEach(dt => dt.classList.remove('drop-target'));
+        this.workarea.querySelectorAll('.folder-window.window-drop-target').forEach(w => w.classList.remove('window-drop-target'));
         if (moved) this.handleDrop(el, ue.clientX, ue.clientY);
         if (onDragEnd) onDragEnd(el);
       };
@@ -538,17 +555,35 @@ class GeminiDesktop {
     const dropTargets = document.elementsFromPoint(clientX, clientY);
     el.style.display = '';
 
+    // Priority 1: Dropped on a folder icon on the desktop
     const targetFolderEl = dropTargets.find(t => t.dataset && t.dataset.type === 'folder' && t.dataset.id !== dragId);
 
-    if (!targetFolderEl) return;
-    const targetFolderId = targetFolderEl.dataset.id;
+    if (targetFolderEl) {
+      const targetFolderId = targetFolderEl.dataset.id;
+      if (dragType === 'chat') {
+        this.moveChatToFolder(dragId, targetFolderId);
+        el.remove();
+        this.showToast('Chat moved to folder');
+      } else if (dragType === 'folder') {
+        this.moveFolderToFolder(dragId, targetFolderId);
+      }
+      return;
+    }
 
-    if (dragType === 'chat') {
-      this.moveChatToFolder(dragId, targetFolderId);
-      el.remove();
-      this.showToast('Chat moved to folder');
-    } else if (dragType === 'folder') {
-      this.moveFolderToFolder(dragId, targetFolderId);
+    // Priority 2: Dropped on an open folder window
+    const windowTarget = dropTargets.find(t => t.closest && t.closest('.folder-window'));
+    if (windowTarget) {
+      const folderWin = windowTarget.closest('.folder-window');
+      const winFolderId = folderWin.id.replace('window-', '');
+      if (winFolderId !== dragId) {
+        if (dragType === 'chat') {
+          this.moveChatToFolder(dragId, winFolderId);
+          el.remove();
+          this.showToast('Chat moved to folder');
+        } else if (dragType === 'folder') {
+          this.moveFolderToFolder(dragId, winFolderId);
+        }
+      }
     }
   }
 
@@ -849,7 +884,6 @@ class GeminiDesktop {
 
         if (!moved) {
           moved = true;
-          // Create ghost clone
           ghost = el.cloneNode(true);
           ghost.className = 'desktop-icon static-icon dragging-ghost';
           ghost.style.position = 'fixed';
@@ -866,14 +900,22 @@ class GeminiDesktop {
         ghost.style.left = (me.clientX - el.offsetWidth / 2) + 'px';
         ghost.style.top = (me.clientY - el.offsetHeight / 2) + 'px';
 
-        // Highlight subfolder drop targets in the window
-        const content = win.querySelector('.folder-window-content');
-        content.querySelectorAll('.drop-target').forEach(dt => dt.classList.remove('drop-target'));
+        // Clear all highlights everywhere
+        this.workarea.querySelectorAll('.drop-target').forEach(dt => dt.classList.remove('drop-target'));
+
         const targets = document.elementsFromPoint(me.clientX, me.clientY);
+
+        // Check for subfolder targets inside the window
         const subfolderTarget = targets.find(t =>
           t.dataset && t.dataset.type === 'subfolder-in-window' && t.dataset.id !== itemId
         );
-        if (subfolderTarget) subfolderTarget.classList.add('drop-target');
+        if (subfolderTarget) { subfolderTarget.classList.add('drop-target'); return; }
+
+        // Check for desktop folder targets (dragging out onto a folder on the desktop)
+        const desktopFolderTarget = targets.find(t =>
+          t.dataset && t.dataset.type === 'folder' && t.dataset.id !== itemId && t.dataset.id !== currentFolder.id
+        );
+        if (desktopFolderTarget) desktopFolderTarget.classList.add('drop-target');
       };
 
       const onUp = (ue) => {
@@ -883,42 +925,35 @@ class GeminiDesktop {
         if (ghost) { ghost.remove(); ghost = null; }
         el.style.opacity = '';
 
-        const content = win.querySelector('.folder-window-content');
-        content.querySelectorAll('.drop-target').forEach(dt => dt.classList.remove('drop-target'));
+        this.workarea.querySelectorAll('.drop-target').forEach(dt => dt.classList.remove('drop-target'));
 
         if (!moved) return;
 
-        // Check what we dropped on
         const targets = document.elementsFromPoint(ue.clientX, ue.clientY);
+
+        // Priority 1: Dropped on a subfolder inside the same window
         const subfolderTarget = targets.find(t =>
           t.dataset && t.dataset.type === 'subfolder-in-window' && t.dataset.id !== itemId
         );
 
         if (subfolderTarget) {
           const targetFolderId = subfolderTarget.dataset.id;
-
           if (itemType === 'chat') {
-            // Remove from current folder, add to target subfolder
             currentFolder.contents = currentFolder.contents.filter(c => c !== itemId);
             const targetFolder = this.getFolderById(targetFolderId);
-            if (targetFolder && !targetFolder.contents.includes(itemId)) {
-              targetFolder.contents.push(itemId);
-            }
+            if (targetFolder && !targetFolder.contents.includes(itemId)) targetFolder.contents.push(itemId);
             this.saveState();
             this.updateFolderBadge(currentFolder.id);
             this.updateFolderBadge(targetFolderId);
             this.refreshFolderWindow(currentFolder.id);
             this.showToast('Chat moved to subfolder');
           } else if (itemType === 'subfolder') {
-            // Move subfolder into another subfolder
             const source = this.getFolderById(itemId);
             if (source && !this.isDescendant(itemId, targetFolderId) && itemId !== targetFolderId) {
               currentFolder.contents = currentFolder.contents.filter(c => c !== itemId);
               source.parentId = targetFolderId;
               const targetFolder = this.getFolderById(targetFolderId);
-              if (targetFolder && !targetFolder.contents.includes(itemId)) {
-                targetFolder.contents.push(itemId);
-              }
+              if (targetFolder && !targetFolder.contents.includes(itemId)) targetFolder.contents.push(itemId);
               this.saveState();
               this.updateFolderBadge(currentFolder.id);
               this.updateFolderBadge(targetFolderId);
@@ -926,6 +961,74 @@ class GeminiDesktop {
               this.showToast(`"${source.name}" moved to subfolder`);
             } else {
               this.showToast("Can't move a folder into its own subfolder");
+            }
+          }
+          return;
+        }
+
+        // Priority 2: Dropped on a desktop folder icon (different from current)
+        const desktopFolderTarget = targets.find(t =>
+          t.dataset && t.dataset.type === 'folder' && t.dataset.id !== itemId && t.dataset.id !== currentFolder.id
+        );
+
+        if (desktopFolderTarget) {
+          const targetFolderId = desktopFolderTarget.dataset.id;
+          if (itemType === 'chat') {
+            currentFolder.contents = currentFolder.contents.filter(c => c !== itemId);
+            const targetFolder = this.getFolderById(targetFolderId);
+            if (targetFolder && !targetFolder.contents.includes(itemId)) targetFolder.contents.push(itemId);
+            this.saveState();
+            this.updateFolderBadge(currentFolder.id);
+            this.updateFolderBadge(targetFolderId);
+            this.refreshFolderWindow(currentFolder.id);
+            this.showToast('Chat moved to folder');
+          } else if (itemType === 'subfolder') {
+            const source = this.getFolderById(itemId);
+            if (source && !this.isDescendant(itemId, targetFolderId) && itemId !== targetFolderId) {
+              currentFolder.contents = currentFolder.contents.filter(c => c !== itemId);
+              source.parentId = targetFolderId;
+              const targetFolder = this.getFolderById(targetFolderId);
+              if (targetFolder && !targetFolder.contents.includes(itemId)) targetFolder.contents.push(itemId);
+              this.saveState();
+              this.updateFolderBadge(currentFolder.id);
+              this.updateFolderBadge(targetFolderId);
+              this.refreshFolderWindow(currentFolder.id);
+              this.showToast(`"${source.name}" moved to folder`);
+            }
+          }
+          return;
+        }
+
+        // Priority 3: Dropped on the bare desktop (outside ANY folder window)
+        const isOverWindow = targets.find(t => t.closest && t.closest('.folder-window'));
+        if (!isOverWindow) {
+          const workRect = this.workarea.getBoundingClientRect();
+          const dropX = ue.clientX - workRect.left - 50;
+          const dropY = ue.clientY - workRect.top - 50;
+
+          if (itemType === 'chat') {
+            currentFolder.contents = currentFolder.contents.filter(c => c !== itemId);
+            this.saveState();
+            this.updateFolderBadge(currentFolder.id);
+            this.refreshFolderWindow(currentFolder.id);
+            // Place on desktop at drop position
+            this.chatPositions[itemId] = { x: Math.max(0, dropX), y: Math.max(0, dropY) };
+            this.saveChatPositions();
+            const chat = this.chats.find(c => c.url === itemId) || { url: itemId, title: 'Chat' };
+            this.renderChat(chat);
+            this.showToast('Chat moved to desktop');
+          } else if (itemType === 'subfolder') {
+            const source = this.getFolderById(itemId);
+            if (source) {
+              currentFolder.contents = currentFolder.contents.filter(c => c !== itemId);
+              source.parentId = null;
+              source.x = Math.max(0, dropX);
+              source.y = Math.max(0, dropY);
+              this.saveState();
+              this.updateFolderBadge(currentFolder.id);
+              this.refreshFolderWindow(currentFolder.id);
+              this.renderFolder(source);
+              this.showToast(`"${source.name}" moved to desktop`);
             }
           }
         }
