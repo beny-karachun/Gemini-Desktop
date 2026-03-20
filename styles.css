@@ -1,53 +1,92 @@
-/* Premium Glassmorphism CSS for Gemini Desktop */
+/* ============================================
+   Gemini Desktop Extension – Premium Styles
+   ============================================ */
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes popIn {
+  from { opacity: 0; transform: scale(0.9); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes slideInToast {
+  from { transform: translateX(120%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes slideOutToast {
+  from { transform: translateX(0); opacity: 1; }
+  to { transform: translateX(120%); opacity: 0; }
+}
+
+@keyframes pulseGlow {
+  0% { box-shadow: 0 0 0 0 rgba(139, 92, 246, 0.4); }
+  70% { box-shadow: 0 0 0 12px rgba(139, 92, 246, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(139, 92, 246, 0); }
+}
+
+/* ---- Variables ---- */
 :root {
-  --desktop-bg: rgba(15, 15, 20, 0.7);
+  --desktop-bg: rgba(12, 12, 18, 0.82);
   --glass-bg: rgba(30, 30, 40, 0.5);
   --glass-border: rgba(255, 255, 255, 0.08);
+  --glass-border-bright: rgba(255, 255, 255, 0.15);
   --text-primary: #ffffff;
   --text-secondary: #a0a0b0;
   --accent-color: #8b5cf6;
   --accent-hover: #a78bfa;
+  --danger-color: #ef4444;
+  --success-color: #10b981;
 }
 
+/* ---- FAB Toggle ---- */
 #gemini-desktop-toggle {
-  position: fixed;
-  bottom: 24px;
-  right: 24px;
-  width: 56px;
-  height: 56px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, var(--accent-color), #ec4899);
-  color: white;
-  border: none;
-  cursor: pointer;
-  box-shadow: 0 4px 20px rgba(139, 92, 246, 0.5);
+  position: fixed !important;
+  bottom: 24px !important;
+  right: 24px !important;
+  width: 56px !important;
+  height: 56px !important;
+  border-radius: 50% !important;
+  background: linear-gradient(135deg, var(--accent-color), #ec4899) !important;
+  color: white !important;
+  border: none !important;
+  cursor: pointer !important;
+  box-shadow: 0 4px 20px rgba(139, 92, 246, 0.5) !important;
   z-index: 2147483647 !important;
   display: flex !important;
-  align-items: center;
-  justify-content: center;
-  transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275), box-shadow 0.3s ease;
+  align-items: center !important;
+  justify-content: center !important;
+  transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275), box-shadow 0.3s ease !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
 }
 
 #gemini-desktop-toggle:hover {
-  transform: scale(1.1);
-  box-shadow: 0 6px 25px rgba(236, 72, 153, 0.6);
+  transform: scale(1.1) !important;
+  box-shadow: 0 6px 25px rgba(236, 72, 153, 0.6) !important;
+  animation: pulseGlow 1.5s infinite !important;
 }
 
+/* ---- Full-screen Overlay ---- */
 #gemini-desktop-overlay {
   position: fixed;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  height: 100vh;
+  top: 0; left: 0;
+  width: 100vw; height: 100vh;
   background: var(--desktop-bg);
   backdrop-filter: blur(24px);
   -webkit-backdrop-filter: blur(24px);
   z-index: 2147483646 !important;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.4s ease;
+  transition: opacity 0.35s ease;
   display: flex;
   flex-direction: column;
+  font-family: 'Inter', sans-serif;
 }
 
 #gemini-desktop-overlay.active {
@@ -55,225 +94,267 @@
   pointer-events: all;
 }
 
-/* Header */
+/* ---- Header ---- */
 .desktop-header {
-  height: 64px;
+  height: 56px;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 0 32px;
+  padding: 0 28px;
   border-bottom: 1px solid var(--glass-border);
-  background: var(--glass-bg);
+  background: rgba(0, 0, 0, 0.25);
+  flex-shrink: 0;
 }
 
 .desktop-header h1 {
   color: var(--text-primary);
   font-family: 'Inter', sans-serif;
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 600;
   margin: 0;
-  letter-spacing: -0.5px;
+  letter-spacing: -0.3px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.desktop-header h1 svg {
+  opacity: 0.6;
 }
 
 .close-desktop-btn {
   background: transparent;
   color: var(--text-secondary);
   border: none;
-  font-size: 28px;
+  font-size: 26px;
   cursor: pointer;
-  transition: color 0.2s, transform 0.2s;
+  transition: color 0.2s, background 0.2s;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
 }
 
 .close-desktop-btn:hover {
-  color: #ef4444;
-  background: rgba(239, 68, 68, 0.1);
+  color: var(--danger-color);
+  background: rgba(239, 68, 68, 0.12);
 }
 
-/* Work Area */
+/* ---- Work Area ---- */
 .desktop-workarea {
   flex: 1;
   position: relative;
   overflow: hidden;
-  padding: 32px;
+  /* subtle grid pattern */
+  background-image:
+    radial-gradient(circle, rgba(255,255,255,0.03) 1px, transparent 1px);
+  background-size: 40px 40px;
 }
 
-/* Folder and Chat Icons */
+/* ---- Desktop Icons (folders & chats) ---- */
 .desktop-icon {
-  width: 110px;
+  width: 100px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   position: absolute;
   cursor: grab;
-  padding: 16px 8px;
-  border-radius: 16px;
-  transition: background 0.2s, transform 0.2s;
+  padding: 14px 8px;
+  border-radius: 12px;
+  transition: background 0.2s, transform 0.15s;
   user-select: none;
   z-index: 10;
 }
 
 .desktop-icon:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .desktop-icon.dragging {
   cursor: grabbing;
-  opacity: 0.9;
-  transform: scale(1.05);
-  z-index: 100 !important;
+  opacity: 0.85;
+  transform: scale(1.08);
+  z-index: 9999 !important;
+  filter: drop-shadow(0 8px 16px rgba(0,0,0,0.4));
+}
+
+.desktop-icon.drop-target {
+  background: rgba(139, 92, 246, 0.2);
+  outline: 2px dashed var(--accent-color);
+  outline-offset: -2px;
+  transform: scale(1.06);
 }
 
 .desktop-icon-svg {
-  width: 52px;
-  height: 52px;
+  width: 48px;
+  height: 48px;
   fill: currentColor;
   color: #3b82f6;
-  filter: drop-shadow(0 4px 8px rgba(0,0,0,0.3));
+  filter: drop-shadow(0 3px 6px rgba(0,0,0,0.3));
   transition: transform 0.2s;
 }
 
 .desktop-icon:hover .desktop-icon-svg {
-  transform: scale(1.05);
+  transform: scale(1.06);
 }
 
 .chat-icon-svg {
-  color: #10b981;
+  color: var(--success-color);
 }
 
 .desktop-icon-label {
   color: var(--text-primary);
   font-family: 'Inter', sans-serif;
-  font-size: 13px;
+  font-size: 12px;
   text-align: center;
-  text-shadow: 0 2px 4px rgba(0,0,0,0.6);
+  text-shadow: 0 1px 4px rgba(0,0,0,0.7);
   word-wrap: break-word;
   max-width: 100%;
   display: -webkit-box;
+  line-clamp: 2;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
-  line-height: 1.3;
+  line-height: 1.35;
 }
 
 .f-badge {
   background: var(--accent-color);
   color: white;
-  border-radius: 12px;
-  padding: 2px 6px;
+  border-radius: 10px;
+  padding: 1px 6px;
   font-size: 10px;
-  font-weight: 600;
+  font-weight: 700;
+  font-family: 'Inter', sans-serif;
   position: absolute;
-  top: 10px;
-  right: 18px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+  top: 8px;
+  right: 14px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.4);
+  min-width: 14px;
+  text-align: center;
 }
 
-/* Context Menu */
+/* ---- Context Menu ---- */
 .desktop-context-menu {
-  position: absolute;
-  background: rgba(25, 25, 35, 0.85);
+  position: fixed;
+  background: rgba(20, 20, 28, 0.92);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
-  border: 1px solid var(--glass-border);
-  border-radius: 12px;
-  padding: 8px 0;
-  min-width: 180px;
-  box-shadow: 0 12px 30px rgba(0,0,0,0.6);
+  border: 1px solid var(--glass-border-bright);
+  border-radius: 10px;
+  padding: 6px 0;
+  min-width: 190px;
+  box-shadow: 0 12px 35px rgba(0,0,0,0.6);
   z-index: 2147483647 !important;
   display: none;
 }
 
 .desktop-context-menu.active {
   display: block;
-  animation: fadeIn 0.2s ease;
-}
-
-@keyframes fadeIn {
-  from { opacity: 0; transform: translateY(-4px); }
-  to { opacity: 1; transform: translateY(0); }
+  animation: fadeIn 0.15s ease;
 }
 
 .context-menu-item {
   color: var(--text-primary);
   font-family: 'Inter', sans-serif;
-  font-size: 14px;
-  padding: 10px 20px;
+  font-size: 13px;
+  padding: 9px 16px;
   cursor: pointer;
-  transition: background 0.2s, color 0.2s;
+  transition: background 0.15s;
   display: flex;
   align-items: center;
   gap: 10px;
 }
 
 .context-menu-item:hover {
-  background: var(--accent-color);
-  color: white;
+  background: rgba(139, 92, 246, 0.25);
 }
 
-/* Modal for New Folder */
-.desktop-modal {
+.context-menu-item.danger {
+  color: var(--danger-color);
+}
+
+.context-menu-item.danger:hover {
+  background: rgba(239, 68, 68, 0.15);
+}
+
+.context-menu-divider {
+  height: 1px;
+  background: var(--glass-border);
+  margin: 4px 0;
+}
+
+/* ---- Modal ---- */
+.desktop-modal-backdrop {
   position: fixed;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%) scale(0.95);
-  background: rgba(20, 20, 30, 0.95);
-  backdrop-filter: blur(30px);
-  border: 1px solid rgba(255,255,255,0.15);
-  border-radius: 20px;
-  padding: 30px;
-  width: 340px;
-  box-shadow: 0 25px 50px rgba(0,0,0,0.6);
+  top: 0; left: 0;
+  width: 100vw; height: 100vh;
+  background: rgba(0,0,0,0.4);
   z-index: 2147483647 !important;
   opacity: 0;
   pointer-events: none;
-  transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  transition: opacity 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.desktop-modal.active {
+.desktop-modal-backdrop.active {
   opacity: 1;
   pointer-events: all;
-  transform: translate(-50%, -50%) scale(1);
+}
+
+.desktop-modal {
+  background: rgba(20, 20, 30, 0.96);
+  backdrop-filter: blur(30px);
+  border: 1px solid var(--glass-border-bright);
+  border-radius: 16px;
+  padding: 28px;
+  width: 320px;
+  box-shadow: 0 25px 50px rgba(0,0,0,0.5);
+  transform: scale(0.95);
+  transition: transform 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.desktop-modal-backdrop.active .desktop-modal {
+  transform: scale(1);
 }
 
 .desktop-modal h2 {
   color: white;
-  margin: 0 0 20px 0;
+  margin: 0 0 18px 0;
   font-family: 'Inter', sans-serif;
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 600;
 }
 
 .desktop-modal input {
   width: 100%;
   box-sizing: border-box;
-  background: rgba(0,0,0,0.25);
+  background: rgba(0,0,0,0.3);
   border: 1px solid rgba(255,255,255,0.1);
-  border-radius: 10px;
-  padding: 12px 16px;
+  border-radius: 8px;
+  padding: 10px 14px;
   color: white;
   font-family: 'Inter', sans-serif;
-  font-size: 15px;
-  margin-bottom: 24px;
+  font-size: 14px;
+  margin-bottom: 20px;
   transition: border-color 0.2s, box-shadow 0.2s;
 }
 
 .desktop-modal input:focus {
   outline: none;
   border-color: var(--accent-color);
-  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.3);
+  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.25);
 }
 
 .desktop-modal-actions {
   display: flex;
   justify-content: flex-end;
-  gap: 12px;
+  gap: 10px;
 }
 
 .desktop-modal-btn {
@@ -282,8 +363,9 @@
   color: var(--text-primary);
   font-family: 'Inter', sans-serif;
   font-weight: 500;
+  font-size: 13px;
   cursor: pointer;
-  padding: 10px 20px;
+  padding: 9px 18px;
   border-radius: 8px;
   transition: all 0.2s;
 }
@@ -292,7 +374,7 @@
   background: linear-gradient(135deg, var(--accent-color), #ec4899);
   border: none;
   color: white;
-  box-shadow: 0 4px 10px rgba(236, 72, 153, 0.3);
+  box-shadow: 0 3px 10px rgba(236, 72, 153, 0.3);
 }
 
 .desktop-modal-btn:hover {
@@ -300,37 +382,37 @@
 }
 
 .desktop-modal-btn.primary:hover {
-  box-shadow: 0 6px 15px rgba(236, 72, 153, 0.5);
+  box-shadow: 0 5px 14px rgba(236, 72, 153, 0.5);
 }
 
-/* Folder Window Subdesktop */
+/* ---- Folder Window (Sub-Desktop) ---- */
 .folder-window {
   position: absolute;
-  top: 100px;
-  left: 200px;
-  width: 450px;
-  height: 350px;
-  background: rgba(25, 25, 35, 0.85);
+  width: 500px;
+  min-height: 280px;
+  background: rgba(20, 20, 30, 0.88);
   backdrop-filter: blur(30px);
   -webkit-backdrop-filter: blur(30px);
-  border: 1px solid var(--glass-border);
-  border-radius: 16px;
-  box-shadow: 0 25px 50px rgba(0,0,0,0.6);
+  border: 1px solid var(--glass-border-bright);
+  border-radius: 14px;
+  box-shadow: 0 20px 50px rgba(0,0,0,0.5);
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  animation: popIn 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  animation: popIn 0.2s ease-out;
+  resize: both;
 }
 
 .folder-window-header {
-  height: 48px;
-  background: rgba(0, 0, 0, 0.2);
+  height: 44px;
+  background: rgba(0, 0, 0, 0.25);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 16px;
+  padding: 0 14px;
   border-bottom: 1px solid var(--glass-border);
   cursor: grab;
+  flex-shrink: 0;
 }
 
 .folder-window-header:active {
@@ -341,19 +423,28 @@
   color: white;
   font-family: 'Inter', sans-serif;
   font-weight: 600;
-  font-size: 15px;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.folder-window-title svg {
+  width: 16px; height: 16px;
+  color: #3b82f6;
+  fill: #3b82f6;
 }
 
 .folder-window-close {
   background: transparent;
   border: none;
   color: var(--text-secondary);
-  font-size: 24px;
+  font-size: 22px;
   font-weight: 300;
   cursor: pointer;
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
   transition: all 0.2s;
   display: flex;
   align-items: center;
@@ -362,40 +453,60 @@
 }
 
 .folder-window-close:hover {
-  background: rgba(239, 68, 68, 0.2);
-  color: #ef4444;
+  background: rgba(239, 68, 68, 0.15);
+  color: var(--danger-color);
 }
 
 .folder-window-content {
   flex: 1;
-  padding: 24px;
+  padding: 20px;
   display: flex;
   flex-wrap: wrap;
-  gap: 16px;
+  gap: 12px;
   align-content: flex-start;
   overflow-y: auto;
 }
 
-/* Icons inside folder window shouldn't be absolutely positioned like desktop ones */
+.folder-window-content::-webkit-scrollbar {
+  width: 6px;
+}
+
+.folder-window-content::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.1);
+  border-radius: 3px;
+}
+
+.folder-empty-msg {
+  color: var(--text-secondary);
+  width: 100%;
+  text-align: center;
+  padding: 30px 20px;
+  font-family: 'Inter', sans-serif;
+  font-size: 14px;
+  opacity: 0.7;
+}
+
+/* ---- Static icons inside folder windows ---- */
 .desktop-icon.static-icon {
   position: relative !important;
   left: auto !important;
   top: auto !important;
   cursor: pointer;
   z-index: 1 !important;
+  width: 90px;
 }
 
 .remove-from-folder-btn {
   position: absolute;
-  top: -4px;
-  right: -4px;
-  background: #ef4444;
+  top: -2px;
+  right: 0;
+  background: var(--danger-color);
   color: white;
   border: none;
   border-radius: 50%;
-  width: 22px;
-  height: 22px;
-  font-size: 14px;
+  width: 20px;
+  height: 20px;
+  font-size: 13px;
   line-height: 1;
   cursor: pointer;
   display: none;
@@ -403,14 +514,45 @@
   justify-content: center;
   z-index: 20;
   box-shadow: 0 2px 5px rgba(0,0,0,0.5);
-  transition: transform 0.2s;
+  transition: transform 0.15s;
 }
 
 .remove-from-folder-btn:hover {
-  transform: scale(1.1);
+  transform: scale(1.15);
   background: #dc2626;
 }
 
 .desktop-icon:hover .remove-from-folder-btn {
   display: flex;
+}
+
+/* ---- Toast Notifications ---- */
+.desktop-toast-container {
+  position: fixed;
+  bottom: 90px;
+  right: 24px;
+  z-index: 2147483647 !important;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.desktop-toast {
+  background: rgba(25, 25, 35, 0.92);
+  backdrop-filter: blur(16px);
+  border: 1px solid var(--glass-border-bright);
+  color: var(--text-primary);
+  font-family: 'Inter', sans-serif;
+  font-size: 13px;
+  padding: 10px 18px;
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  animation: slideInToast 0.3s ease forwards;
+  pointer-events: auto;
+  max-width: 280px;
+}
+
+.desktop-toast.removing {
+  animation: slideOutToast 0.3s ease forwards;
 }
